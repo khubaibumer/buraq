@@ -36,6 +36,13 @@ public:
   constexpr const T& value() const& { return std::get<T>(storage_); }
   constexpr T&& value() && { return std::get<T>(std::move(storage_)); }
 
+  constexpr T& operator*() & { return value(); }
+  constexpr const T& operator*() const& { return value(); }
+  constexpr T&& operator*() && { return std::move(value()); }
+
+  constexpr T* operator->() { return &value(); }
+  constexpr const T* operator->() const { return &value(); }
+
   constexpr E& error() & { return std::get<unexpected<E>>(storage_).error; }
   constexpr const E& error() const& { return std::get<unexpected<E>>(storage_).error; }
 
@@ -43,6 +50,32 @@ public:
   constexpr auto and_then(F&& f) & {
     using Ret = std::invoke_result_t<F, T&>;
     if (has_value()) return std::invoke(std::forward<F>(f), value());
+    return Ret(unexpected<E>(error()));
+  }
+};
+
+template <typename E>
+class expected<void, E> {
+  std::variant<std::monostate, unexpected<E>> storage_;
+public:
+  constexpr expected() noexcept : storage_(std::monostate{}) {}
+  constexpr expected(unexpected<E> err) : storage_(std::move(err)) {}
+
+  [[nodiscard]] constexpr bool has_value() const noexcept {
+    return std::holds_alternative<std::monostate>(storage_);
+  }
+  constexpr explicit operator bool() const noexcept { return has_value(); }
+
+  constexpr void value() const noexcept {}
+  constexpr void operator*() const noexcept {}
+
+  constexpr E& error() & { return std::get<unexpected<E>>(storage_).error; }
+  constexpr const E& error() const& { return std::get<unexpected<E>>(storage_).error; }
+
+  template <typename F>
+  constexpr auto and_then(F&& f) & {
+    using Ret = std::invoke_result_t<F>;
+    if (has_value()) return std::invoke(std::forward<F>(f));
     return Ret(unexpected<E>(error()));
   }
 };
