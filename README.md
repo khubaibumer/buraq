@@ -1,5 +1,7 @@
 # buraq
 
+[![CI](https://github.com/khubaibumer/buraq/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/buraq/actions/workflows/ci.yml)
+
 **Zero-overhead, sans-I/O C++20/23 implementation of the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).**
 
 `buraq` bridges native C++ applications (IDEs, game engines, terminals, custom editors) and local or remote AI coding agents over JSON-RPC 2.0—without vtables, heap-allocated callback maps, or event-loop lock-in.
