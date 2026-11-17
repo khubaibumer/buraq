@@ -35,32 +35,6 @@ public:
         std::cout << "[Client FS] Agent requested file: " << params.path << '\n';
         return buraq::v1::FsReadTextFileResult{.content = "// sample file content"};
     }
-
-    void on_raw_response(const buraq::RawEnvelope& env) {
-        if (!env.id || !std::holds_alternative<std::int64_t>(*env.id)) return;
-        const auto id = std::get<std::int64_t>(*env.id);
-
-        if (id == 1) {
-            auto res = buraq::GlazeCodec::decode<buraq::v1::InitializeResult>(env.result_json);
-            if (res) {
-                std::cout << "[Client] Connected to agent: "
-                          << (res->agentInfo ? res->agentInfo->name : "unknown") << '\n';
-                init_done = true;
-            }
-        } else if (id == 2) {
-            auto res = buraq::GlazeCodec::decode<buraq::v1::SessionNewResult>(env.result_json);
-            if (res) {
-                session_id = res->sessionId;
-                std::cout << "[Client] Created session: " << session_id << '\n';
-            }
-        } else if (id == 3) {
-            auto res = buraq::GlazeCodec::decode<buraq::v1::SessionPromptResult>(env.result_json);
-            if (res) {
-                std::cout << "[Client] Turn finished: " << res->stopReason << '\n';
-                turn_done = true;
-            }
-        }
-    }
 };
 
 int main(int argc, char* argv[]) {
@@ -125,18 +99,41 @@ int main(int argc, char* argv[]) {
     client.send_initialize(buraq::v1::InitializeParams{
         .clientCapabilities = {.fs = buraq::v1::ClientCapabilities::FsCapabilities{.readTextFile = true}},
         .clientInfo = buraq::v1::ImplementationInfo{"buraq-minimal-client", "0.1.0"},
-    }, pipe_sink);
+    }, pipe_sink, [&](buraq::expected<buraq::v1::InitializeResult, buraq::RpcError> res) {
+        if (res) {
+            std::cout << "[Client] Connected to agent: "
+                      << (res->agentInfo ? res->agentInfo->name : "unknown") << '\n';
+            client.init_done = true;
+        } else {
+            std::cerr << "[Client] initialize failed: " << res.error().message << '\n';
+        }
+    });
     while (!client.init_done && read_next_frame(client)) {}
 
     // 2. session/new
-    client.send_session_new(buraq::v1::SessionNewParams{.cwd = "/tmp"}, pipe_sink);
+    client.send_session_new(buraq::v1::SessionNewParams{.cwd = "/tmp"}, pipe_sink,
+        [&](buraq::expected<buraq::v1::SessionNewResult, buraq::RpcError> res) {
+            if (res) {
+                client.session_id = res->sessionId;
+                std::cout << "[Client] Created session: " << client.session_id << '\n';
+            } else {
+                std::cerr << "[Client] session/new failed: " << res.error().message << '\n';
+            }
+        });
     while (client.session_id.empty() && read_next_frame(client)) {}
 
     // 3. session/prompt
     client.send_session_prompt(buraq::v1::SessionPromptParams{
         .sessionId = client.session_id,
         .prompt = {buraq::v1::TextContent{.text = "Hello from minimal_client!"}},
-    }, pipe_sink);
+    }, pipe_sink, [&](buraq::expected<buraq::v1::SessionPromptResult, buraq::RpcError> res) {
+        if (res) {
+            std::cout << "[Client] Turn finished: " << res->stopReason << '\n';
+            client.turn_done = true;
+        } else {
+            std::cerr << "[Client] session/prompt failed: " << res.error().message << '\n';
+        }
+    });
     while (!client.turn_done && read_next_frame(client)) {}
 
     close(to_agent[1]);

@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 3.23)
 project(buraq VERSION 0.1.0 LANGUAGES CXX)
 
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 option(BURAQ_BUILD_EXAMPLES "Build example ACP agent and client" ON)
 option(BURAQ_BUILD_TESTS "Build unit tests" ON)
 option(BURAQ_FETCH_CODECS "Fetch Glaze / nlohmann_json automatically if not found" ON)
+option(BURAQ_INSTALL "Generate install and CMake package export rules" ${PROJECT_IS_TOP_LEVEL})
 
 # --- Core Header-Only Library (Zero External Dependencies) ---
 add_library(buraq INTERFACE)
@@ -28,8 +32,40 @@ target_sources(buraq INTERFACE
 
 target_include_directories(buraq INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+# --- Install & find_package(buraq) Support ---
+if(BURAQ_INSTALL)
+    install(TARGETS buraq
+            EXPORT buraqTargets
+            FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+
+    install(EXPORT buraqTargets
+            FILE buraqTargets.cmake
+            NAMESPACE buraq::
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/buraq
+    )
+
+    configure_package_config_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/buraqConfig.cmake.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/buraqConfig.cmake"
+            INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/buraq
+    )
+
+    write_basic_package_version_file(
+            "${CMAKE_CURRENT_BINARY_DIR}/buraqConfigVersion.cmake"
+            VERSION ${PROJECT_VERSION}
+            COMPATIBILITY SameMajorVersion
+    )
+
+    install(FILES
+            "${CMAKE_CURRENT_BINARY_DIR}/buraqConfig.cmake"
+            "${CMAKE_CURRENT_BINARY_DIR}/buraqConfigVersion.cmake"
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/buraq
+    )
+endif()
 
 # --- Optional Codec Dependencies (Only for Examples / Tests) ---
 if(BURAQ_BUILD_EXAMPLES OR BURAQ_BUILD_TESTS)
@@ -67,15 +103,16 @@ if(BURAQ_BUILD_EXAMPLES)
                 $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
                 $<$<CXX_COMPILER_ID:MSVC>:/W4>
         )
+
+        if(NOT WIN32)
+            add_executable(buraq_minimal_client examples/minimal_client.cpp)
+            target_link_libraries(buraq_minimal_client PRIVATE buraq::buraq glaze::glaze)
+            target_compile_options(buraq_minimal_client PRIVATE
+                    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+            )
+        endif()
     else()
-        message(STATUS "Skipping buraq_echo_agent: glaze::glaze not available")
-    endif()
-    if(TARGET glaze::glaze AND NOT WIN32)
-        add_executable(buraq_minimal_client examples/minimal_client.cpp)
-        target_link_libraries(buraq_minimal_client PRIVATE buraq::buraq glaze::glaze)
-        target_compile_options(buraq_minimal_client PRIVATE
-                $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
-        )
+        message(STATUS "Skipping examples: glaze::glaze not available")
     endif()
 endif()
 
@@ -83,8 +120,7 @@ endif()
 if(BURAQ_BUILD_TESTS)
     enable_testing()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/dispatch_test.cpp")
-        add_executable(buraq_dispatch_test tests/dispatch_test.cpp
-                tests/dispatch_test.cpp)
+        add_executable(buraq_dispatch_test tests/dispatch_test.cpp)
         target_link_libraries(buraq_dispatch_test PRIVATE
                 buraq::buraq
                 $<$<TARGET_EXISTS:glaze::glaze>:glaze::glaze>

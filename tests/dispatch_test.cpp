@@ -243,6 +243,16 @@ void run_codec_suite(std::string_view codec_name) {
         }
     };
 
+    bool callback_invoked = false;
+    client.send_session_set_mode({"sess_42", "code"}, agent_in,
+        [&](buraq::expected<buraq::v1::SessionSetModeResult, buraq::RpcError> res) {
+            assert(res.has_value());
+            callback_invoked = true;
+        });
+    assert(client.pending_count() == 1);
+    pump();
+    assert(callback_invoked && client.pending_count() == 0);
+
     // 1. Handshake: initialize
     const auto init_id = client.send_initialize(buraq::v1::InitializeParams{
         .clientCapabilities = buraq::v1::ClientCapabilities{
