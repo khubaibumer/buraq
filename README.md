@@ -2,13 +2,13 @@
 
 **Zero-overhead, sans-I/O C++20/23 implementation of the [Agent Client Protocol (ACP)](https://agentclientprotocol.com).**
 
-`buraq` bridges native C++ applications (IDEs, game engines, terminals, custom editors) and local or remote AI coding agents over JSON-RPC 2.0\u2014without vtables, heap-allocated callback maps, or event-loop lock-in.
+`buraq` bridges native C++ applications (IDEs, game engines, terminals, custom editors) and local or remote AI coding agents over JSON-RPC 2.0—without vtables, heap-allocated callback maps, or event-loop lock-in.
 
 ---
 
 ## Why `buraq`?
 
-The Agent Client Protocol standardizes communication between **Clients** (editors/hosts) and **Agents** (autonomous coding assistants), much like LSP did for language servers. While official SDKs target Rust, TypeScript, Python, and JVM languages, native C++ codebases\u2014editors, CAD/engineering suites, game engines, and `llama.cpp`-based local inference agents\u2014need a protocol layer that respects systems-level constraints:
+The Agent Client Protocol standardizes communication between **Clients** (editors/hosts) and **Agents** (autonomous coding assistants), much like LSP did for language servers. While official SDKs target Rust, TypeScript, Python, and JVM languages, native C++ codebases—editors, CAD/engineering suites, game engines, and `llama.cpp`-based local inference agents—need a protocol layer that respects systems-level constraints:
 
 * **Sans-I/O Architecture:** Feed raw byte frames (`std::span<const std::byte>`) from any transport (`stdio` pipes, Asio, `libuv`, `io_uring`, Qt event loops, or WebSockets) and emit serialized responses through a generic sink callable.
 * **Zero-Cost Static Polymorphism (CRTP):** `AgentBase<Derived, Codec>` and `ClientBase<Derived, Codec>` use C++20 `requires` expressions inside `if constexpr` to resolve supported ACP methods and optional capabilities at compile time. Unimplemented methods compile away completely.
@@ -22,7 +22,7 @@ The Agent Client Protocol standardizes communication between **Clients** (editor
 ```mermaid
 flowchart TB
     A["Transport Layer<br/>(Your event loop or buraq::transport::stdio)"]
-    B["buraq::AgentBase&lt;Derived, Codec&gt; / ClientBase&lt;...&gt;<br/><br/>\u2022 Envelope routing (RawEnvelope \u2014 deferred payload parse)<br/>\u2022 Compile-time capability &amp; method dispatch (CRTP)"]
+    B["buraq::AgentBase&lt;Derived, Codec&gt; / ClientBase&lt;...&gt;<br/><br/>• Envelope routing (RawEnvelope — deferred payload parse)<br/>• Compile-time capability &amp; method dispatch (CRTP)"]
     C["Pluggable JsonCodec<br/>(GlazeCodec / NlohmannCodec / Custom)"]
 
     A -->|"std::span&lt;const std::byte&gt;"| B
