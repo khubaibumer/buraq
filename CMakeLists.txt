@@ -76,7 +76,8 @@ endif()
 if(BURAQ_BUILD_TESTS)
     enable_testing()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/dispatch_test.cpp")
-        add_executable(buraq_dispatch_test tests/dispatch_test.cpp)
+        add_executable(buraq_dispatch_test tests/dispatch_test.cpp
+                tests/dispatch_test.cpp)
         target_link_libraries(buraq_dispatch_test PRIVATE
                 buraq::buraq
                 $<$<TARGET_EXISTS:glaze::glaze>:glaze::glaze>

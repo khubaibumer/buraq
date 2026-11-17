@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <span>
+#include <string>
 #include <string_view>
 #include "buraq/detail/compat.hpp"
 #include "buraq/protocol/jsonrpc.hpp"
@@ -21,7 +22,6 @@ protected:
     }
 
 public:
-    // Sans-I/O entry point: feed raw bytes from any transport (stdio, WebSocket, ring buffer)
     template <typename OutboundSink>
     expected<void, RpcError> feed(std::span<const std::byte> frame, OutboundSink&& sink) {
         auto env = Codec::parse_envelope(frame);
@@ -31,20 +31,75 @@ public:
         return dispatch_message(*env, std::forward<OutboundSink>(sink));
     }
 
-    // Helper for derived agents to emit streaming session/update notifications
+    // --- Streaming Notifications (Agent -> Client) ---
     template <typename OutboundSink>
     void emit_session_update(const v1::SessionUpdateNotification& update, OutboundSink&& sink) {
-        auto wire = Codec::encode_notification("session/update", update);
-        emit_bytes(wire, std::forward<OutboundSink>(sink));
+        emit_bytes(Codec::encode_notification("session/update", update), std::forward<OutboundSink>(sink));
     }
 
-    // Helper for derived agents to invoke delegated client tools (e.g., fs/read_text_file)
+    // --- Delegated Client Requests (Agent -> Client) ---
+    template <typename OutboundSink>
+    void request_permission(const RequestId& id,
+                            const v1::RequestPermissionParams& params,
+                            OutboundSink&& sink) {
+        emit_bytes(Codec::encode_request(id, "session/request_permission", params),
+                   std::forward<OutboundSink>(sink));
+    }
+
     template <typename OutboundSink>
     void request_fs_read(const RequestId& id,
                          const v1::FsReadTextFileParams& params,
                          OutboundSink&& sink) {
-        auto wire = Codec::encode_request(id, "fs/read_text_file", params);
-        emit_bytes(wire, std::forward<OutboundSink>(sink));
+        emit_bytes(Codec::encode_request(id, "fs/read_text_file", params),
+                   std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    void request_fs_write(const RequestId& id,
+                          const v1::FsWriteTextFileParams& params,
+                          OutboundSink&& sink) {
+        emit_bytes(Codec::encode_request(id, "fs/write_text_file", params),
+                   std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    void request_terminal_create(const RequestId& id,
+                                 const v1::TerminalCreateParams& params,
+                                 OutboundSink&& sink) {
+        emit_bytes(Codec::encode_request(id, "terminal/create", params),
+                   std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    void request_terminal_output(const RequestId& id,
+                                 const v1::TerminalOutputParams& params,
+                                 OutboundSink&& sink) {
+        emit_bytes(Codec::encode_request(id, "terminal/output", params),
+                   std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    void request_terminal_wait_for_exit(const RequestId& id,
+                                        const v1::TerminalWaitForExitParams& params,
+                                        OutboundSink&& sink) {
+        emit_bytes(Codec::encode_request(id, "terminal/wait_for_exit", params),
+                   std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    void request_terminal_kill(const RequestId& id,
+                               const v1::TerminalKillParams& params,
+                               OutboundSink&& sink) {
+        emit_bytes(Codec::encode_request(id, "terminal/kill", params),
+                   std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    void request_terminal_release(const RequestId& id,
+                                  const v1::TerminalReleaseParams& params,
+                                  OutboundSink&& sink) {
+        emit_bytes(Codec::encode_request(id, "terminal/release", params),
+                   std::forward<OutboundSink>(sink));
     }
 
 private:
@@ -75,6 +130,39 @@ private:
                 } else {
                     return expected<v1::SessionNewResult, RpcError>(
                         unexpected(RpcError::method_not_found("session/new")));
+                }
+            });
+        }
+
+        if (env.method == "session/load") {
+            return handle_request<v1::SessionLoadParams>(env, sink, [](Derived& d, const auto& p, auto&) {
+                if constexpr (requires { d.on_session_load(p); }) {
+                    return d.on_session_load(p);
+                } else {
+                    return expected<v1::SessionLoadResult, RpcError>(
+                        unexpected(RpcError::method_not_found("session/load")));
+                }
+            });
+        }
+
+        if (env.method == "session/set_mode") {
+            return handle_request<v1::SessionSetModeParams>(env, sink, [](Derived& d, const auto& p, auto&) {
+                if constexpr (requires { d.on_session_set_mode(p); }) {
+                    return d.on_session_set_mode(p);
+                } else {
+                    return expected<v1::SessionSetModeResult, RpcError>(
+                        unexpected(RpcError::method_not_found("session/set_mode")));
+                }
+            });
+        }
+
+        if (env.method == "session/set_model") {
+            return handle_request<v1::SessionSetModelParams>(env, sink, [](Derived& d, const auto& p, auto&) {
+                if constexpr (requires { d.on_session_set_model(p); }) {
+                    return d.on_session_set_model(p);
+                } else {
+                    return expected<v1::SessionSetModelResult, RpcError>(
+                        unexpected(RpcError::method_not_found("session/set_model")));
                 }
             });
         }

@@ -15,13 +15,46 @@
 template <>
 struct glz::meta<buraq::v1::ContentBlock> {
     static constexpr std::string_view tag = "type";
-    static constexpr auto ids = std::array{"text", "resource_link"};
+    static constexpr auto ids = std::array{
+        "text",
+        "image",
+        "audio",
+        "resource_link",
+        "resource"
+    };
+};
+
+template <>
+struct glz::meta<buraq::v1::ToolCallContent> {
+    static constexpr std::string_view tag = "type";
+    static constexpr auto ids = std::array{
+        "content",
+        "diff",
+        "terminal"
+    };
 };
 
 template <>
 struct glz::meta<buraq::v1::SessionUpdatePayload> {
     static constexpr std::string_view tag = "sessionUpdate";
-    static constexpr auto ids = std::array{"agent_message_chunk", "tool_call"};
+    static constexpr auto ids = std::array{
+        "user_message_chunk",
+        "agent_message_chunk",
+        "agent_thought_chunk",
+        "tool_call",
+        "tool_call_update",
+        "plan",
+        "available_commands_update"
+    };
+};
+
+template <>
+struct glz::meta<buraq::v1::PermissionOutcome> {
+    static constexpr std::string_view tag = "outcome";
+    static constexpr auto ids = std::array{
+        "cancelled",
+        "selected"
+    };
 };
 
 namespace buraq {

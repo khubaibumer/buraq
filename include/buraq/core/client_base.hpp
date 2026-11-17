@@ -4,7 +4,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include "buraq/detail/compat.hpp"
 #include "buraq/protocol/jsonrpc.hpp"
 #include "buraq/protocol/schema_v1.hpp"
@@ -20,38 +19,55 @@ protected:
     std::int64_t next_id_{1};
 
 public:
-    // Send typed ACP requests to the agent
+    // --- Outbound Client -> Agent Requests & Notifications ---
     template <typename OutboundSink>
     std::int64_t send_initialize(const v1::InitializeParams& params, OutboundSink&& sink) {
         const auto id = next_id_++;
-        auto wire = Codec::encode_request(RequestId{id}, "initialize", params);
-        emit_bytes(wire, std::forward<OutboundSink>(sink));
+        emit_bytes(Codec::encode_request(RequestId{id}, "initialize", params), std::forward<OutboundSink>(sink));
         return id;
     }
 
     template <typename OutboundSink>
     std::int64_t send_session_new(const v1::SessionNewParams& params, OutboundSink&& sink) {
         const auto id = next_id_++;
-        auto wire = Codec::encode_request(RequestId{id}, "session/new", params);
-        emit_bytes(wire, std::forward<OutboundSink>(sink));
+        emit_bytes(Codec::encode_request(RequestId{id}, "session/new", params), std::forward<OutboundSink>(sink));
+        return id;
+    }
+
+    template <typename OutboundSink>
+    std::int64_t send_session_load(const v1::SessionLoadParams& params, OutboundSink&& sink) {
+        const auto id = next_id_++;
+        emit_bytes(Codec::encode_request(RequestId{id}, "session/load", params), std::forward<OutboundSink>(sink));
+        return id;
+    }
+
+    template <typename OutboundSink>
+    std::int64_t send_session_set_mode(const v1::SessionSetModeParams& params, OutboundSink&& sink) {
+        const auto id = next_id_++;
+        emit_bytes(Codec::encode_request(RequestId{id}, "session/set_mode", params), std::forward<OutboundSink>(sink));
+        return id;
+    }
+
+    template <typename OutboundSink>
+    std::int64_t send_session_set_model(const v1::SessionSetModelParams& params, OutboundSink&& sink) {
+        const auto id = next_id_++;
+        emit_bytes(Codec::encode_request(RequestId{id}, "session/set_model", params), std::forward<OutboundSink>(sink));
         return id;
     }
 
     template <typename OutboundSink>
     std::int64_t send_session_prompt(const v1::SessionPromptParams& params, OutboundSink&& sink) {
         const auto id = next_id_++;
-        auto wire = Codec::encode_request(RequestId{id}, "session/prompt", params);
-        emit_bytes(wire, std::forward<OutboundSink>(sink));
+        emit_bytes(Codec::encode_request(RequestId{id}, "session/prompt", params), std::forward<OutboundSink>(sink));
         return id;
     }
 
     template <typename OutboundSink>
     void send_session_cancel(const v1::SessionCancelParams& params, OutboundSink&& sink) {
-        auto wire = Codec::encode_notification("session/cancel", params);
-        emit_bytes(wire, std::forward<OutboundSink>(sink));
+        emit_bytes(Codec::encode_notification("session/cancel", params), std::forward<OutboundSink>(sink));
     }
 
-    // Feed raw incoming frames from the agent subprocess/socket
+    // --- Inbound Frame Entry Point ---
     template <typename OutboundSink>
     expected<void, RpcError> feed(std::span<const std::byte> frame, OutboundSink&& sink) {
         auto env = Codec::parse_envelope(frame);
@@ -88,43 +104,80 @@ private:
         return {};
     }
 
+    template <typename Params, typename OutboundSink, typename Handler>
+    expected<void, RpcError> handle_agent_request(const RawEnvelope& env, OutboundSink& sink, Handler&& handler) {
+        auto params = Codec::template decode<Params>(env.params_json);
+        if (!params) {
+            emit_bytes(Codec::encode_error(*env.id, params.error()), sink);
+            return {};
+        }
+
+        auto res = handler(self(), *params);
+        if (!res) {
+            emit_bytes(Codec::encode_error(*env.id, res.error()), sink);
+        } else {
+            emit_bytes(Codec::encode_result(*env.id, *res), sink);
+        }
+        return {};
+    }
+
     template <typename OutboundSink>
     expected<void, RpcError> dispatch_agent_request(const RawEnvelope& env, OutboundSink&& sink) {
+        if (env.method == "session/request_permission") {
+            if constexpr (requires(Derived& d, const v1::RequestPermissionParams& p) { d.on_request_permission(p); }) {
+                return handle_agent_request<v1::RequestPermissionParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_request_permission(p); });
+            }
+        }
+
         if (env.method == "fs/read_text_file") {
-            if constexpr (requires(Derived& d, const v1::FsReadTextFileParams& p) {
-                d.on_fs_read_text_file(p);
-            }) {
-                auto params = Codec::template decode<v1::FsReadTextFileParams>(env.params_json);
-                if (!params) {
-                    emit_bytes(Codec::encode_error(*env.id, params.error()), sink);
-                    return {};
-                }
-                auto res = self().on_fs_read_text_file(*params);
-                if (!res) {
-                    emit_bytes(Codec::encode_error(*env.id, res.error()), sink);
-                } else {
-                    emit_bytes(Codec::encode_result(*env.id, *res), sink);
-                }
-                return {};
+            if constexpr (requires(Derived& d, const v1::FsReadTextFileParams& p) { d.on_fs_read_text_file(p); }) {
+                return handle_agent_request<v1::FsReadTextFileParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_fs_read_text_file(p); });
             }
         }
 
         if (env.method == "fs/write_text_file") {
-            if constexpr (requires(Derived& d, const v1::FsWriteTextFileParams& p) {
-                d.on_fs_write_text_file(p);
+            if constexpr (requires(Derived& d, const v1::FsWriteTextFileParams& p) { d.on_fs_write_text_file(p); }) {
+                return handle_agent_request<v1::FsWriteTextFileParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_fs_write_text_file(p); });
+            }
+        }
+
+        if (env.method == "terminal/create") {
+            if constexpr (requires(Derived& d, const v1::TerminalCreateParams& p) { d.on_terminal_create(p); }) {
+                return handle_agent_request<v1::TerminalCreateParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_create(p); });
+            }
+        }
+
+        if (env.method == "terminal/output") {
+            if constexpr (requires(Derived& d, const v1::TerminalOutputParams& p) { d.on_terminal_output(p); }) {
+                return handle_agent_request<v1::TerminalOutputParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_output(p); });
+            }
+        }
+
+        if (env.method == "terminal/wait_for_exit") {
+            if constexpr (requires(Derived& d, const v1::TerminalWaitForExitParams& p) {
+                d.on_terminal_wait_for_exit(p);
             }) {
-                auto params = Codec::template decode<v1::FsWriteTextFileParams>(env.params_json);
-                if (!params) {
-                    emit_bytes(Codec::encode_error(*env.id, params.error()), sink);
-                    return {};
-                }
-                auto res = self().on_fs_write_text_file(*params);
-                if (!res) {
-                    emit_bytes(Codec::encode_error(*env.id, res.error()), sink);
-                } else {
-                    emit_bytes(Codec::encode_result(*env.id, *res), sink);
-                }
-                return {};
+                return handle_agent_request<v1::TerminalWaitForExitParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_wait_for_exit(p); });
+            }
+        }
+
+        if (env.method == "terminal/kill") {
+            if constexpr (requires(Derived& d, const v1::TerminalKillParams& p) { d.on_terminal_kill(p); }) {
+                return handle_agent_request<v1::TerminalKillParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_kill(p); });
+            }
+        }
+
+        if (env.method == "terminal/release") {
+            if constexpr (requires(Derived& d, const v1::TerminalReleaseParams& p) { d.on_terminal_release(p); }) {
+                return handle_agent_request<v1::TerminalReleaseParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_release(p); });
             }
         }
 
