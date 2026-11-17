@@ -70,6 +70,13 @@ if(BURAQ_BUILD_EXAMPLES)
     else()
         message(STATUS "Skipping buraq_echo_agent: glaze::glaze not available")
     endif()
+    if(TARGET glaze::glaze AND NOT WIN32)
+        add_executable(buraq_minimal_client examples/minimal_client.cpp)
+        target_link_libraries(buraq_minimal_client PRIVATE buraq::buraq glaze::glaze)
+        target_compile_options(buraq_minimal_client PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+        )
+    endif()
 endif()
 
 # --- Tests ---
