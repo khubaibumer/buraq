@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (SemVer x.y.z, e.g. 0.1.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate Version Input
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate SemVer & Check Tag Availability
+        id: check
+        run: |
+          VER="${{ inputs.version }}"
+          VER="${VER#v}" # strip leading 'v' if user typed v0.1.0
+
+          if ! [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid version '$VER'. Expected SemVer format x.y.z (e.g. 0.1.0)."
+            exit 1
+          fi
+
+          TAG="v${VER}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag '$TAG' already exists!"
+            exit 1
+          fi
+
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Run Full CI Verification
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
+  tag-and-publish:
+    name: Tag ${{ needs.validate.outputs.tag }} & Publish Release
+    needs: [validate, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create & Push Annotated Git Tag
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          VER: ${{ needs.validate.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Package Clean Source Archives
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          git archive --format=tar.gz --prefix="buraq-${TAG}/" "$TAG" -o "buraq-${TAG}.tar.gz"
+          git archive --format=zip --prefix="buraq-${TAG}/" "$TAG" -o "buraq-${TAG}.zip"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: "buraq ${{ needs.validate.outputs.tag }}"
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            buraq-${{ needs.validate.outputs.tag }}.tar.gz
+            buraq-${{ needs.validate.outputs.tag }}.zip

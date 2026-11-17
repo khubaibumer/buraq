@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_call:
+
+
+permissions:
+  contents: read
+
+jobs:
+  cpp-matrix:
+    name: ${{ matrix.name }} (C++${{ matrix.std }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu GCC
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+            std: 20
+          - name: Ubuntu GCC
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+            std: 23
+          - name: Ubuntu Clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+            std: 20
+          - name: Ubuntu Clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+            std: 23
+          - name: macOS AppleClang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+            std: 20
+          - name: Windows MSVC
+            os: windows-latest
+            cc: cl
+            cxx: cl
+            std: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: >
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_STANDARD=${{ matrix.std }}
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
+          -DBURAQ_BUILD_EXAMPLES=ON
+          -DBURAQ_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Run CTest suite
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  sdk-compliance:
+    name: Official @agentclientprotocol/sdk Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Configure & Build Echo Agent
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DBURAQ_BUILD_EXAMPLES=ON \
+            -DBURAQ_BUILD_TESTS=OFF
+          cmake --build build --target buraq_echo_agent --parallel
+
+      - name: Run Official TS SDK Verification
+        run: |
+          npm install --no-save @agentclientprotocol/sdk
+          node scripts/verify_sdk.mjs ./build/buraq_echo_agent
+
+  package-verify:
+    name: CMake Install & Consumer find_package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install buraq to staging prefix
+        run: |
+          cmake -B build -DBURAQ_BUILD_EXAMPLES=OFF -DBURAQ_BUILD_TESTS=OFF -DBURAQ_INSTALL=ON
+          cmake --install build --prefix "${{ runner.temp }}/buraq-install"
+
+      - name: Verify downstream find_package(buraq) consumer
+        run: |
+          mkdir -p "${{ runner.temp }}/consumer"
+          cat << 'EOF' > "${{ runner.temp }}/consumer/CMakeLists.txt"
+          cmake_minimum_required(VERSION 3.23)
+          project(buraq_consumer LANGUAGES CXX)
+          find_package(buraq CONFIG REQUIRED)
+          add_executable(consumer main.cpp)
+          target_link_libraries(consumer PRIVATE buraq::buraq)
+          EOF
+
+          cat << 'EOF' > "${{ runner.temp }}/consumer/main.cpp"
+          #include <buraq/acp.hpp>
+          int main() { return 0; }
+          EOF
+
+          cmake -S "${{ runner.temp }}/consumer" \
+                -B "${{ runner.temp }}/consumer/build" \
+                -DCMAKE_PREFIX_PATH="${{ runner.temp }}/buraq-install"
+          cmake --build "${{ runner.temp }}/consumer/build"
