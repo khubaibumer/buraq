@@ -1,60 +1,135 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
+#include <map>
 #include <glaze/glaze.hpp>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
+#include <variant>
 #include "buraq/detail/compat.hpp"
 #include "buraq/protocol/jsonrpc.hpp"
 #include "buraq/protocol/schema_v1.hpp"
 
-// Tagged-union discriminators required by ACP v1 JSON Schema
-template <>
-struct glz::meta<buraq::v1::ContentBlock> {
-    static constexpr std::string_view tag = "type";
-    static constexpr auto ids = std::array{
-        "text",
-        "image",
-        "audio",
-        "resource_link",
-        "resource"
+// Tagged-union discriminators required by ACP v1 JSON Schema (single source: buraq::v1::variant_tag)
+#define BURAQ_GLZ_TAGGED_VARIANT(VariantType)                                              \
+    template <>                                                                             \
+    struct glz::meta<VariantType> {                                                         \
+        static constexpr std::string_view tag = buraq::v1::variant_tag<VariantType>::key;  \
+        static constexpr auto ids = buraq::v1::variant_tag<VariantType>::ids;              \
     };
+
+BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::ContentBlock)
+BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::ToolCallContent)
+BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::SessionUpdatePayload)
+BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::PermissionOutcome)
+BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::McpServer)
+BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::AuthMethod)
+
+#undef BURAQ_GLZ_TAGGED_VARIANT
+
+// Unions whose default alternative carries no tag (McpServer: stdio, AuthMethod: agent). Glaze's key-based
+// deduction cannot tell them apart when the untagged alternative's keys are a subset of a tagged one, so
+// dispatch on the tag explicitly: known tag -> that alternative, missing tag -> the untagged alternative.
+namespace buraq::detail {
+
+template <typename Variant, std::size_t I = 0>
+void glz_emplace_alternative(Variant& out, std::size_t index, std::string_view json, glz::error_code& ec) {
+    if constexpr (I < std::variant_size_v<Variant>) {
+        if (index != I) {
+            glz_emplace_alternative<Variant, I + 1>(out, index, json, ec);
+            return;
+        }
+        using Alt = std::variant_alternative_t<I, Variant>;
+        Alt alt{};
+        ec = glz::read<glz::opts{.error_on_unknown_keys = false}>(alt, json).ec;
+        if (ec == glz::error_code::none) {
+            if constexpr (requires { alt.type; }) {
+                alt.type = Alt{}.type; // tag literal must not alias the temporary input buffer
+            }
+            out = std::move(alt);
+        }
+    }
+}
+
+template <typename Variant>
+void glz_read_default_tagged(Variant& value, std::string_view json, glz::error_code& ec) {
+    using Tag = buraq::v1::variant_tag<Variant>;
+    std::map<std::string, glz::raw_json, std::less<>> obj;
+    ec = glz::read<glz::opts{.error_on_unknown_keys = false}>(obj, json).ec;
+    if (ec != glz::error_code::none) {
+        return;
+    }
+    std::size_t index = static_cast<std::size_t>(Tag::untagged);
+    if (auto it = obj.find(Tag::key); it != obj.end()) {
+        std::string tag;
+        if (glz::read_json(tag, it->second.str)) {
+            ec = glz::error_code::no_matching_variant_type;
+            return;
+        }
+        index = Tag::ids.size();
+        for (std::size_t i = 0; i < Tag::ids.size(); ++i) {
+            if (Tag::ids[i] == tag) {
+                index = i;
+            }
+        }
+        if (index == Tag::ids.size()) {
+            ec = glz::error_code::no_matching_variant_type;
+            return;
+        }
+    }
+    glz_emplace_alternative(value, index, json, ec);
+}
+
+} // namespace buraq::detail
+
+#define BURAQ_GLZ_DEFAULT_TAGGED_READER(VariantType)                                          \
+    template <>                                                                               \
+    struct glz::detail::from<glz::JSON, VariantType> {                                        \
+        template <auto Opts>                                                                  \
+        static void op(auto&& value, is_context auto&& ctx, auto&& it, auto&& end) {          \
+            glz::raw_json raw{};                                                              \
+            glz::detail::read<glz::JSON>::template op<Opts>(raw, ctx, it, end);               \
+            if (bool(ctx.error)) [[unlikely]] {                                               \
+                return;                                                                       \
+            }                                                                                 \
+            glz::error_code ec{};                                                             \
+            buraq::detail::glz_read_default_tagged(value, raw.str, ec);                       \
+            if (ec != glz::error_code::none) {                                                \
+                ctx.error = ec;                                                               \
+            }                                                                                 \
+        }                                                                                     \
+    };
+
+BURAQ_GLZ_DEFAULT_TAGGED_READER(buraq::v1::McpServer)
+BURAQ_GLZ_DEFAULT_TAGGED_READER(buraq::v1::AuthMethod)
+
+#undef BURAQ_GLZ_DEFAULT_TAGGED_READER
+
+// Raw JSON passthrough (empty text encodes as `null`)
+template <>
+struct glz::meta<buraq::RawJson> {
+    static constexpr auto read_fn = [](buraq::RawJson& self, const glz::raw_json& in) { self.json = in.str; };
+    static constexpr auto write_fn = [](const buraq::RawJson& self) {
+        return glz::raw_json{self.json.empty() ? std::string("null") : self.json};
+    };
+    static constexpr auto value = glz::custom<read_fn, write_fn>;
 };
 
+// `delete` is a C++ keyword; the member is spelled `delete_`
 template <>
-struct glz::meta<buraq::v1::ToolCallContent> {
-    static constexpr std::string_view tag = "type";
-    static constexpr auto ids = std::array{
-        "content",
-        "diff",
-        "terminal"
-    };
-};
-
-template <>
-struct glz::meta<buraq::v1::SessionUpdatePayload> {
-    static constexpr std::string_view tag = "sessionUpdate";
-    static constexpr auto ids = std::array{
-        "user_message_chunk",
-        "agent_message_chunk",
-        "agent_thought_chunk",
-        "tool_call",
-        "tool_call_update",
-        "plan",
-        "available_commands_update"
-    };
-};
-
-template <>
-struct glz::meta<buraq::v1::PermissionOutcome> {
-    static constexpr std::string_view tag = "outcome";
-    static constexpr auto ids = std::array{
-        "cancelled",
-        "selected"
-    };
+struct glz::meta<buraq::v1::SessionCapabilities> {
+    using T = buraq::v1::SessionCapabilities;
+    static constexpr auto value = glz::object("list", &T::list,
+                                              "delete", &T::delete_,
+                                              "additionalDirectories", &T::additionalDirectories,
+                                              "systemPrompt", &T::systemPrompt,
+                                              "resume", &T::resume,
+                                              "close", &T::close);
 };
 
 namespace buraq {

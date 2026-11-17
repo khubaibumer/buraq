@@ -1,18 +1,30 @@
 #pragma once
 
+#include <concepts>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 #include "buraq/detail/compat.hpp"
 #include "buraq/protocol/jsonrpc.hpp"
 #include "buraq/protocol/schema_v1.hpp"
 
 namespace buraq {
 
+// CRTP base for ACP clients. Every handler is optional and detected at compile time; agent requests for
+// methods the derived class does not implement are answered with -32601 (Method not found).
+//
+// Agent -> Client requests:      on_request_permission, on_fs_read_text_file, on_fs_write_text_file,
+//                                on_terminal_{create,output,wait_for_exit,kill,release}, on_elicitation_create,
+//                                on_ext_method
+// Agent -> Client notifications: on_session_update (+ on_unhandled_session_update), on_elicitation_complete,
+//                                on_cancel_request, on_ext_notification
+// Responses without a typed callback: on_raw_response
 template <typename Derived, JsonCodec Codec>
 class ClientBase {
 protected:
@@ -32,6 +44,16 @@ public:
     }
 
     template <typename OutboundSink>
+    std::int64_t send_authenticate(const v1::AuthenticateParams& params, OutboundSink&& sink) {
+        return send_request_raw("authenticate", params, std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    std::int64_t send_logout(const v1::LogoutParams& params, OutboundSink&& sink) {
+        return send_request_raw("logout", params, std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
     std::int64_t send_session_new(const v1::SessionNewParams& params, OutboundSink&& sink) {
         return send_request_raw("session/new", params, std::forward<OutboundSink>(sink));
     }
@@ -42,10 +64,36 @@ public:
     }
 
     template <typename OutboundSink>
+    std::int64_t send_session_resume(const v1::SessionResumeParams& params, OutboundSink&& sink) {
+        return send_request_raw("session/resume", params, std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    std::int64_t send_session_list(const v1::SessionListParams& params, OutboundSink&& sink) {
+        return send_request_raw("session/list", params, std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    std::int64_t send_session_delete(const v1::SessionDeleteParams& params, OutboundSink&& sink) {
+        return send_request_raw("session/delete", params, std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    std::int64_t send_session_close(const v1::SessionCloseParams& params, OutboundSink&& sink) {
+        return send_request_raw("session/close", params, std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
     std::int64_t send_session_set_mode(const v1::SessionSetModeParams& params, OutboundSink&& sink) {
         return send_request_raw("session/set_mode", params, std::forward<OutboundSink>(sink));
     }
 
+    template <typename OutboundSink>
+    std::int64_t send_session_set_config_option(const v1::SessionSetConfigOptionParams& params, OutboundSink&& sink) {
+        return send_request_raw("session/set_config_option", params, std::forward<OutboundSink>(sink));
+    }
+
+    // UNSTABLE: `session/set_model` is not part of the stable ACP v1 schema
     template <typename OutboundSink>
     std::int64_t send_session_set_model(const v1::SessionSetModelParams& params, OutboundSink&& sink) {
         return send_request_raw("session/set_model", params, std::forward<OutboundSink>(sink));
@@ -56,11 +104,38 @@ public:
         return send_request_raw("session/prompt", params, std::forward<OutboundSink>(sink));
     }
 
+    // Custom `_`-prefixed extension request
+    template <typename OutboundSink>
+    std::int64_t send_ext_method(std::string_view method, const RawJson& params, OutboundSink&& sink) {
+        return send_request_raw(method, params, std::forward<OutboundSink>(sink));
+    }
+
     // --- Typed Callback Outbound Requests (automatic decoding & ID correlation) ---
+    // `initialize` responses are also recorded for agent_capabilities() / agent_info() / auth_methods()
     template <typename OutboundSink, typename Callback>
     std::int64_t send_initialize(const v1::InitializeParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::InitializeResult>(
-            "initialize", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
+            "initialize", params, std::forward<OutboundSink>(sink),
+            [this, callback = std::forward<Callback>(cb)](expected<v1::InitializeResult, RpcError> res) mutable {
+                if (res) {
+                    agent_capabilities_ = res->agentCapabilities;
+                    agent_info_ = res->agentInfo;
+                    auth_methods_ = res->authMethods;
+                }
+                callback(std::move(res));
+            });
+    }
+
+    template <typename OutboundSink, typename Callback>
+    std::int64_t send_authenticate(const v1::AuthenticateParams& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<v1::AuthenticateResult>(
+            "authenticate", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
+    }
+
+    template <typename OutboundSink, typename Callback>
+    std::int64_t send_logout(const v1::LogoutParams& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<v1::LogoutResult>(
+            "logout", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
 
     template <typename OutboundSink, typename Callback>
@@ -76,11 +151,44 @@ public:
     }
 
     template <typename OutboundSink, typename Callback>
+    std::int64_t send_session_resume(const v1::SessionResumeParams& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<v1::SessionResumeResult>(
+            "session/resume", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
+    }
+
+    template <typename OutboundSink, typename Callback>
+    std::int64_t send_session_list(const v1::SessionListParams& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<v1::SessionListResult>(
+            "session/list", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
+    }
+
+    template <typename OutboundSink, typename Callback>
+    std::int64_t send_session_delete(const v1::SessionDeleteParams& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<v1::SessionDeleteResult>(
+            "session/delete", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
+    }
+
+    template <typename OutboundSink, typename Callback>
+    std::int64_t send_session_close(const v1::SessionCloseParams& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<v1::SessionCloseResult>(
+            "session/close", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
+    }
+
+    template <typename OutboundSink, typename Callback>
     std::int64_t send_session_set_mode(const v1::SessionSetModeParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionSetModeResult>(
             "session/set_mode", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
 
+    template <typename OutboundSink, typename Callback>
+    std::int64_t send_session_set_config_option(const v1::SessionSetConfigOptionParams& params,
+                                                OutboundSink&& sink,
+                                                Callback&& cb) {
+        return send_request_typed<v1::SessionSetConfigOptionResult>(
+            "session/set_config_option", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
+    }
+
+    // UNSTABLE: `session/set_model` is not part of the stable ACP v1 schema
     template <typename OutboundSink, typename Callback>
     std::int64_t send_session_set_model(const v1::SessionSetModelParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionSetModelResult>(
@@ -93,9 +201,40 @@ public:
             "session/prompt", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
 
+    template <typename OutboundSink, typename Callback>
+    std::int64_t send_ext_method(std::string_view method, const RawJson& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<RawJson>(method, params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
+    }
+
+    // --- Outbound Notifications ---
     template <typename OutboundSink>
     void send_session_cancel(const v1::SessionCancelParams& params, OutboundSink&& sink) {
         emit_bytes(Codec::encode_notification("session/cancel", params), std::forward<OutboundSink>(sink));
+    }
+
+    // Ask the agent to abandon an in-flight request (`$/cancel_request`). The pending callback stays
+    // registered: the agent still answers, typically with -32800 (Request cancelled).
+    template <typename OutboundSink>
+    void send_cancel_request(const v1::CancelRequestParams& params, OutboundSink&& sink) {
+        emit_bytes(Codec::encode_notification("$/cancel_request", params), std::forward<OutboundSink>(sink));
+    }
+
+    template <typename OutboundSink>
+    void send_ext_notification(std::string_view method, const RawJson& params, OutboundSink&& sink) {
+        emit_bytes(Codec::encode_notification(method, params), std::forward<OutboundSink>(sink));
+    }
+
+    // --- Negotiated Agent Capabilities (populated by the typed send_initialize overload) ---
+    [[nodiscard]] const std::optional<v1::AgentCapabilities>& agent_capabilities() const noexcept {
+        return agent_capabilities_;
+    }
+
+    [[nodiscard]] const std::optional<v1::ImplementationInfo>& agent_info() const noexcept {
+        return agent_info_;
+    }
+
+    [[nodiscard]] const std::vector<v1::AuthMethod>& auth_methods() const noexcept {
+        return auth_methods_;
     }
 
     [[nodiscard]] std::size_t pending_count() const noexcept {
@@ -131,6 +270,10 @@ public:
     }
 
 private:
+    std::optional<v1::AgentCapabilities> agent_capabilities_{};
+    std::optional<v1::ImplementationInfo> agent_info_{};
+    std::vector<v1::AuthMethod> auth_methods_{};
+
     template <typename OutboundSink>
     static void emit_bytes(std::string_view wire, OutboundSink&& sink) {
         sink(std::as_bytes(std::span{wire.data(), wire.size()}));
@@ -167,8 +310,46 @@ private:
                 d.on_session_update(u);
             }) {
                 auto update = Codec::template decode<v1::SessionUpdateNotification>(env.params_json);
-                if (!update) return unexpected(update.error());
+                if (!update) {
+                    // Forward-compat: newer agents may emit sessionUpdate kinds this SDK does not model yet
+                    if constexpr (requires(Derived& d, const RawEnvelope& e, const RpcError& err) {
+                        d.on_unhandled_session_update(e, err);
+                    }) {
+                        self().on_unhandled_session_update(env, update.error());
+                        return {};
+                    }
+                    return unexpected(update.error());
+                }
                 self().on_session_update(*update);
+            }
+            return {};
+        }
+
+        if (env.method == "elicitation/complete") {
+            if constexpr (requires(Derived& d, const v1::CompleteElicitationParams& p) {
+                d.on_elicitation_complete(p);
+            }) {
+                auto params = Codec::template decode<v1::CompleteElicitationParams>(env.params_json);
+                if (!params) return unexpected(params.error());
+                self().on_elicitation_complete(*params);
+            }
+            return {};
+        }
+
+        if (env.method == "$/cancel_request") {
+            if constexpr (requires(Derived& d, const v1::CancelRequestParams& p) { d.on_cancel_request(p); }) {
+                auto params = Codec::template decode<v1::CancelRequestParams>(env.params_json);
+                if (!params) return unexpected(params.error());
+                self().on_cancel_request(*params);
+            }
+            return {};
+        }
+
+        if (!env.method.empty() && env.method.front() == '_') {
+            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
+                d.on_ext_notification(m, p);
+            }) {
+                self().on_ext_notification(env.method, RawJson{std::string(env.params_json)});
             }
         }
         return {};
@@ -179,6 +360,10 @@ private:
         auto params = Codec::template decode<Params>(env.params_json);
         if (!params) {
             emit_bytes(Codec::encode_error(*env.id, params.error()), sink);
+            return {};
+        }
+        if (auto reason = v1::validate(*params)) {
+            emit_bytes(Codec::encode_error(*env.id, RpcError::invalid_params(*reason)), sink);
             return {};
         }
 
@@ -248,6 +433,27 @@ private:
             if constexpr (requires(Derived& d, const v1::TerminalReleaseParams& p) { d.on_terminal_release(p); }) {
                 return handle_agent_request<v1::TerminalReleaseParams>(
                     env, sink, [](Derived& d, const auto& p) { return d.on_terminal_release(p); });
+            }
+        }
+
+        if (env.method == "elicitation/create") {
+            if constexpr (requires(Derived& d, const v1::CreateElicitationParams& p) { d.on_elicitation_create(p); }) {
+                return handle_agent_request<v1::CreateElicitationParams>(
+                    env, sink, [](Derived& d, const auto& p) { return d.on_elicitation_create(p); });
+            }
+        }
+
+        if (!env.method.empty() && env.method.front() == '_') {
+            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
+                { d.on_ext_method(m, p) } -> std::same_as<expected<RawJson, RpcError>>;
+            }) {
+                auto res = self().on_ext_method(env.method, RawJson{std::string(env.params_json)});
+                if (!res) {
+                    emit_bytes(Codec::encode_error(*env.id, res.error()), sink);
+                } else {
+                    emit_bytes(Codec::encode_result(*env.id, *res), sink);
+                }
+                return {};
             }
         }
 

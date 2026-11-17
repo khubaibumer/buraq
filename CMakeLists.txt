@@ -4,10 +4,18 @@ project(buraq VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-option(BURAQ_BUILD_EXAMPLES "Build example ACP agent and client" ON)
-option(BURAQ_BUILD_TESTS "Build unit tests" ON)
+option(BURAQ_BUILD_EXAMPLES "Build example ACP agent and client" ${PROJECT_IS_TOP_LEVEL})
+option(BURAQ_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
 option(BURAQ_FETCH_CODECS "Fetch Glaze / nlohmann_json automatically if not found" ON)
 option(BURAQ_INSTALL "Generate install and CMake package export rules" ${PROJECT_IS_TOP_LEVEL})
+option(BURAQ_ENABLE_COVERAGE "Instrument tests/examples and add the buraq_coverage target (GCC/Clang + gcovr)" OFF)
+
+if(BURAQ_ENABLE_COVERAGE)
+    if(NOT BURAQ_BUILD_TESTS)
+        message(FATAL_ERROR "BURAQ_ENABLE_COVERAGE requires BURAQ_BUILD_TESTS=ON")
+    endif()
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuraqCoverage.cmake")
+endif()
 
 # --- Core Header-Only Library (Zero External Dependencies) ---
 add_library(buraq INTERFACE)
@@ -127,5 +135,31 @@ if(BURAQ_BUILD_TESTS)
                 $<$<TARGET_EXISTS:nlohmann_json::nlohmann_json>:nlohmann_json::nlohmann_json>
         )
         add_test(NAME dispatch_test COMMAND buraq_dispatch_test)
+
+        # Same suite compiled against the amalgamated single-header distribution
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/single_include/buraq/acp.hpp"
+                AND TARGET glaze::glaze AND TARGET nlohmann_json::nlohmann_json)
+            add_executable(buraq_single_include_test tests/dispatch_test.cpp)
+            target_compile_features(buraq_single_include_test PRIVATE cxx_std_20)
+            target_include_directories(buraq_single_include_test PRIVATE
+                    "${CMAKE_CURRENT_SOURCE_DIR}/single_include")
+            target_link_libraries(buraq_single_include_test PRIVATE
+                    glaze::glaze nlohmann_json::nlohmann_json)
+            add_test(NAME single_include_test COMMAND buraq_single_include_test)
+        endif()
     endif()
+
+    # End-to-end: the minimal client spawns the echo agent over real stdio pipes.
+    if(TARGET buraq_minimal_client AND TARGET buraq_echo_agent)
+        add_test(NAME stdio_e2e_test
+                COMMAND buraq_minimal_client $<TARGET_FILE:buraq_echo_agent>)
+        set_tests_properties(stdio_e2e_test PROPERTIES PASS_REGULAR_EXPRESSION "Turn finished: end_turn")
+    endif()
+endif()
+
+if(BURAQ_ENABLE_COVERAGE)
+    # single_include_test is not instrumented: it would only re-measure the amalgamated copy.
+    foreach(_buraq_cov_target buraq_dispatch_test buraq_echo_agent buraq_minimal_client)
+        buraq_enable_coverage(${_buraq_cov_target})
+    endforeach()
 endif()

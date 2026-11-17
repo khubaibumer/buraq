@@ -71,9 +71,18 @@ int main(int argc, char* argv[]) {
 
     FILE* agent_out = fdopen(from_agent[0], "r");
     auto pipe_sink = [fd = to_agent[1]](std::span<const std::byte> bytes) {
-        (void)write(fd, bytes.data(), bytes.size());
+        auto write_all = [fd](const void* data, std::size_t size) {
+            const auto* p = static_cast<const char*>(data);
+            while (size > 0) {
+                const auto n = write(fd, p, size);
+                if (n <= 0) return;
+                p += n;
+                size -= static_cast<std::size_t>(n);
+            }
+        };
+        write_all(bytes.data(), bytes.size());
         if (bytes.empty() || bytes.back() != std::byte{'\n'}) {
-            (void)write(fd, "\n", 1);
+            write_all("\n", 1);
         }
     };
 

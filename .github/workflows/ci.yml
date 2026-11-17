@@ -72,6 +72,23 @@ jobs:
       - name: Run CTest suite
         run: ctest --test-dir build -C Release --output-on-failure
 
+  single-header:
+    name: Single-Header Amalgamation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify single_include/ is up to date
+        run: python3 scripts/amalgamate.py --check
+
+      - name: Compile zero-dependency single header standalone
+        run: |
+          printf '#include <buraq/acp.hpp>\nint main() { return 0; }\n' > sh.cpp
+          for std in 20 23; do
+            g++ -std=c++${std} -Wall -Wextra -Wpedantic -Werror -Isingle_include sh.cpp -o sh
+          done
+
   sdk-compliance:
     name: Official @agentclientprotocol/sdk Compliance
     runs-on: ubuntu-latest
@@ -97,6 +114,88 @@ jobs:
         run: |
           npm install --no-save @agentclientprotocol/sdk
           node scripts/verify_sdk.mjs ./build/buraq_echo_agent
+
+  coverage:
+    name: Code Coverage (GCC, gcovr)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install gcovr
+        run: pipx install "gcovr>=8.3"
+
+      - name: Configure (instrumented Debug build)
+        run: >
+          cmake -B build-cov
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_STANDARD=23
+          -DBURAQ_BUILD_EXAMPLES=ON
+          -DBURAQ_BUILD_TESTS=ON
+          -DBURAQ_ENABLE_COVERAGE=ON
+          -DBURAQ_COVERAGE_FAIL_UNDER_LINE=90
+
+      - name: Build
+        run: cmake --build build-cov --parallel
+
+      - name: Run tests and collect coverage
+        run: cmake --build build-cov --target buraq_coverage
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          if [ -f build-cov/coverage/summary.md ]; then
+            cat build-cov/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build-cov/coverage/
+
+  acp-tck:
+    name: Official ACP Conformance Test Kit (TCK)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Configure & Build Echo Agent
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DBURAQ_BUILD_EXAMPLES=ON \
+            -DBURAQ_BUILD_TESTS=OFF
+          cmake --build build --target buraq_echo_agent --parallel
+
+      # The TCK exits non-zero on ADVISORY failures (e.g. the echo example does not launch MCP servers),
+      # so gate the job on the MANDATORY verdict from the JSON report instead.
+      - name: Run acp-tck against the echo agent
+        run: |
+          mkdir -p tck-wd
+          uvx --from git+https://github.com/agentclientprotocol/acp-tck@v0.4.0 acp-tck \
+            --agent-cwd tck-wd --timeout 10 --report-json tck-report.json \
+            -- "$PWD/build/buraq_echo_agent" || true
+          python3 - << 'EOF'
+          import json, sys
+          verdict = json.load(open("tck-report.json"))["verdict"]
+          print(json.dumps(verdict, indent=2))
+          mandatory = verdict["tier_counts"]["MANDATORY"]
+          sys.exit(0 if verdict["conformant"] and mandatory["FAIL"] == 0 else 1)
+          EOF
+
+      - name: Upload TCK report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acp-tck-report
+          path: tck-report.json
 
   package-verify:
     name: CMake Install & Consumer find_package

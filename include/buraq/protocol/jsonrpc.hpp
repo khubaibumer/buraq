@@ -3,6 +3,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <optional>
 #include <span>
 #include <string>
@@ -13,6 +14,57 @@
 namespace buraq {
 
 using RequestId = std::variant<std::int64_t, std::string>;
+
+// Arbitrary, codec-neutral JSON value kept as serialized text (e.g. `rawInput`, elicitation schemas,
+// extension-method payloads). An empty string encodes as JSON `null`.
+struct RawJson {
+    std::string json{};
+    auto operator<=>(const RawJson&) const = default;
+};
+
+namespace detail {
+
+// Serialize `text` as a JSON string literal (RFC 8259 escaping)
+inline std::string json_quote(std::string_view text) {
+    std::string out;
+    out.reserve(text.size() + 2);
+    out.push_back('"');
+    for (const char ch : text) {
+        switch (ch) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(ch) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(ch)));
+                    out += buf;
+                } else {
+                    out.push_back(ch);
+                }
+        }
+    }
+    out.push_back('"');
+    return out;
+}
+
+} // namespace detail
+
+// JSON-RPC 2.0 and ACP v1 error codes
+namespace error_code {
+inline constexpr int parse_error = -32700;
+inline constexpr int invalid_request = -32600;
+inline constexpr int method_not_found = -32601;
+inline constexpr int invalid_params = -32602;
+inline constexpr int internal_error = -32603;
+inline constexpr int request_cancelled = -32800;
+inline constexpr int auth_required = -32000;
+inline constexpr int resource_not_found = -32002;
+} // namespace error_code
 
 struct RpcError {
     int code{-32603};
@@ -36,6 +88,18 @@ struct RpcError {
     }
     static RpcError request_cancelled() {
         return {-32800, "Request cancelled", std::nullopt};
+    }
+    static RpcError auth_required(std::string_view msg = "Authentication required") {
+        return {-32000, std::string(msg), std::nullopt};
+    }
+    static RpcError resource_not_found(std::string_view msg = "Resource not found",
+                                       std::optional<std::string> data_json = std::nullopt) {
+        return {-32002, std::string(msg), std::move(data_json)};
+    }
+    // -32002 with `data.sessionId`, as recommended for unknown or closed sessions
+    static RpcError session_not_found(std::string_view session_id) {
+        return resource_not_found("Session not found: " + std::string(session_id),
+                                  "{\"sessionId\":" + detail::json_quote(session_id) + "}");
     }
 };
 

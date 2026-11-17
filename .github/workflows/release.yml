@@ -40,6 +40,12 @@ jobs:
             exit 1
           fi
 
+          CMAKE_VER="$(sed -nE 's/^project\(buraq VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt)"
+          if [[ "${VER%%-*}" != "$CMAKE_VER" ]]; then
+            echo "::error::Version '$VER' does not match CMakeLists.txt project VERSION '$CMAKE_VER'."
+            exit 1
+          fi
+
           TAG="v${VER}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "::error::Tag '$TAG' already exists!"
@@ -91,3 +97,4 @@ jobs:
           files: |
             buraq-${{ needs.validate.outputs.tag }}.tar.gz
             buraq-${{ needs.validate.outputs.tag }}.zip
+            single_include/buraq/acp.hpp
