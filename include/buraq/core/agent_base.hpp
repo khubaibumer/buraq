@@ -1,9 +1,11 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include "buraq/detail/compat.hpp"
 #include "buraq/protocol/jsonrpc.hpp"
 #include "buraq/protocol/schema_v1.hpp"
@@ -112,87 +114,72 @@ namespace buraq {
             }
 
             if (env.method == "initialize") {
-                return handle_request<v1::InitializeParams>(env, sink, [](Derived &d, const auto &p, auto &) {
-                    if constexpr (requires { d.on_initialize(p); }) {
-                        return d.on_initialize(p);
-                    } else {
-                        return expected<v1::InitializeResult, RpcError>(
-                            unexpected(RpcError::method_not_found("initialize")));
-                    }
-                });
+                if constexpr (requires(Derived &d, const v1::InitializeParams &p) { d.on_initialize(p); }) {
+                    return handle_request<v1::InitializeParams>(
+                        env, sink, [](Derived &d, const auto &p, auto &) { return d.on_initialize(p); });
+                }
             }
 
             if (env.method == "session/new") {
-                return handle_request<v1::SessionNewParams>(env, sink, [](Derived &d, const auto &p, auto &) {
-                    if constexpr (requires { d.on_session_new(p); }) {
-                        return d.on_session_new(p);
-                    } else {
-                        return expected<v1::SessionNewResult, RpcError>(
-                            unexpected(RpcError::method_not_found("session/new")));
-                    }
-                });
+                if constexpr (requires(Derived &d, const v1::SessionNewParams &p) { d.on_session_new(p); }) {
+                    return handle_request<v1::SessionNewParams>(
+                        env, sink, [](Derived &d, const auto &p, auto &) { return d.on_session_new(p); });
+                }
             }
 
             if (env.method == "session/load") {
-                return handle_request<v1::SessionLoadParams>(env, sink, [](Derived &d, const auto &p, auto &) {
-                    if constexpr (requires { d.on_session_load(p); }) {
-                        return d.on_session_load(p);
-                    } else {
-                        return expected<v1::SessionLoadResult, RpcError>(
-                            unexpected(RpcError::method_not_found("session/load")));
-                    }
-                });
+                if constexpr (requires(Derived &d, const v1::SessionLoadParams &p) { d.on_session_load(p); }) {
+                    return handle_request<v1::SessionLoadParams>(
+                        env, sink, [](Derived &d, const auto &p, auto &) { return d.on_session_load(p); });
+                }
             }
 
             if (env.method == "session/set_mode") {
-                return handle_request<v1::SessionSetModeParams>(env, sink, [](Derived &d, const auto &p, auto &) {
-                    if constexpr (requires { d.on_session_set_mode(p); }) {
-                        return d.on_session_set_mode(p);
-                    } else {
-                        return expected<v1::SessionSetModeResult, RpcError>(
-                            unexpected(RpcError::method_not_found("session/set_mode")));
-                    }
-                });
+                if constexpr (requires(Derived &d, const v1::SessionSetModeParams &p) { d.on_session_set_mode(p); }) {
+                    return handle_request<v1::SessionSetModeParams>(
+                        env, sink, [](Derived &d, const auto &p, auto &) { return d.on_session_set_mode(p); });
+                }
             }
 
             if (env.method == "session/set_model") {
-                return handle_request<v1::SessionSetModelParams>(env, sink, [](Derived &d, const auto &p, auto &) {
-                    if constexpr (requires { d.on_session_set_model(p); }) {
-                        return d.on_session_set_model(p);
-                    } else {
-                        return expected<v1::SessionSetModelResult, RpcError>(
-                            unexpected(RpcError::method_not_found("session/set_model")));
-                    }
-                });
+                if constexpr (requires(Derived &d, const v1::SessionSetModelParams &p) { d.on_session_set_model(p); }) {
+                    return handle_request<v1::SessionSetModelParams>(
+                        env, sink, [](Derived &d, const auto &p, auto &) { return d.on_session_set_model(p); });
+                }
             }
 
             if (env.method == "session/prompt") {
-                return handle_request<v1::SessionPromptParams>(
-                    env, sink, [](Derived &d, const auto &p, OutboundSink &s) {
 #if BURAQ_HAS_STD_GENERATOR
-                        if constexpr (requires
-                        {
-                            { d.on_session_prompt_stream(p) } -> std::same_as<generator<v1::SessionUpdatePayload> >;
-                        }) {
-                            for (auto &&update: d.on_session_prompt_stream(p)) {
+                if constexpr (requires(Derived &d, const v1::SessionPromptParams &p) {
+                    { d.on_session_prompt_stream(p) } -> std::same_as<generator<v1::SessionUpdatePayload>>;
+                }) {
+                    return handle_request<v1::SessionPromptParams>(
+                        env, sink, [](Derived &d, const auto &p, OutboundSink &s) {
+                            for (auto &&update : d.on_session_prompt_stream(p)) {
                                 d.emit_session_update(v1::SessionUpdateNotification{
-                                                          .sessionId = p.sessionId,
-                                                          .update = std::forward<decltype(update)>(update),
-                                                      }, s);
+                                    .sessionId = p.sessionId,
+                                    .update = std::forward<decltype(update)>(update),
+                                }, s);
                             }
                             return expected<v1::SessionPromptResult, RpcError>(
                                 v1::SessionPromptResult{.stopReason = "end_turn"});
-                        } else
+                        });
+                }
 #endif
-                            if constexpr (requires { d.on_session_prompt(p, s); }) {
-                                return d.on_session_prompt(p, s);
-                            } else if constexpr (requires { d.on_session_prompt(p); }) {
-                                return d.on_session_prompt(p);
-                            } else {
-                                return expected<v1::SessionPromptResult, RpcError>(
-                                    unexpected(RpcError::method_not_found("session/prompt")));
-                            }
-                    });
+                if constexpr (requires(Derived &d, const v1::SessionPromptParams &p, OutboundSink &s) {
+                    d.on_session_prompt(p, s);
+                }) {
+                    return handle_request<v1::SessionPromptParams>(
+                        env, sink, [](Derived &d, const auto &p, OutboundSink &s) {
+                            return d.on_session_prompt(p, s);
+                        });
+                }
+                if constexpr (requires(Derived &d, const v1::SessionPromptParams &p) { d.on_session_prompt(p); }) {
+                    return handle_request<v1::SessionPromptParams>(
+                        env, sink, [](Derived &d, const auto &p, auto &) {
+                            return d.on_session_prompt(p);
+                        });
+                }
             }
 
             if (env.method == "session/cancel") {
