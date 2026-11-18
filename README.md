@@ -1,6 +1,7 @@
 # buraq
 
 [![CI](https://github.com/khubaibumer/buraq/actions/workflows/ci.yml/badge.svg)](https://github.com/khubaibumer/buraq/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkhubaibumer%2Fburaq%2Fbadges%2Fcoverage.json)](https://github.com/khubaibumer/buraq/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20%20%7C%2023-informational.svg)](#requirements)
 
@@ -255,7 +256,7 @@ cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DBURAQ_ENABLE_COVERAGE=ON
 cmake --build build-cov --target buraq_coverage
 ```
 
-The target resets the counters, runs `ctest`, and prints a per-header summary. It writes `build-cov/coverage/index.html` (annotated source), `coverage.xml` (Cobertura), `summary.json`, and `summary.md`. Only `include/buraq/` is measured. CI publishes the summary for each run and uploads the HTML report as an artifact.
+The target resets the counters, runs `ctest`, and prints a per-header summary. It writes `build-cov/coverage/index.html` (annotated source), `coverage.xml` (Cobertura), `summary.json`, and `summary.md`. Only `include/buraq/` is measured. CI publishes the summary for each run and uploads the HTML report as an artifact. On pushes to `main` it also refreshes the README coverage badge, which reads `coverage.json` on the `badges` branch.
 
 ### Smoke-Testing Over `stdio`
 

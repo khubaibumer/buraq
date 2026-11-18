@@ -118,6 +118,8 @@ jobs:
   coverage:
     name: Code Coverage (GCC, gcovr)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # publishes the README badge JSON to the `badges` branch on pushes to main
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -154,6 +156,35 @@ jobs:
         with:
           name: coverage-report
           path: build-cov/coverage/
+
+      # shields.io endpoint badge, kept on an orphan `badges` branch so main's history stays clean
+      - name: Publish coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          python3 - << 'EOF'
+          import json
+          pct = json.load(open("build-cov/coverage/summary.json"))["line_percent"]
+          color = "brightgreen" if pct >= 90 else "green" if pct >= 80 else "yellow" if pct >= 70 else "red"
+          badge = {"schemaVersion": 1, "label": "coverage", "message": f"{pct:.1f}%", "color": color}
+          json.dump(badge, open("/tmp/coverage.json", "w"))
+          print(badge)
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth=1 origin badges; then
+            git switch -c badges FETCH_HEAD
+          else
+            git switch --orphan badges
+          fi
+          git rm -rf --quiet . 2>/dev/null || true
+          cp /tmp/coverage.json coverage.json
+          git add coverage.json
+          if git diff --cached --quiet; then
+            echo "Coverage badge unchanged"
+          else
+            git commit -m "Update coverage badge [skip ci]"
+            git push origin badges
+          fi
 
   acp-tck:
     name: Official ACP Conformance Test Kit (TCK)
