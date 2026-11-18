@@ -228,6 +228,50 @@ jobs:
           name: acp-tck-report
           path: tck-report.json
 
+  vcpkg-port:
+    name: vcpkg Port (overlay, glaze + nlohmann-json)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install buraq from the in-repo port (local sources)
+        run: |
+          python3 scripts/vcpkg_port.py overlay "${{ runner.temp }}/overlay"
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install "buraq[glaze,nlohmann-json]" \
+            --overlay-ports="${{ runner.temp }}/overlay"
+
+      - name: Build & run test_package consumer
+        run: |
+          cmake -S test_package -B "${{ runner.temp }}/vcpkg-consumer" \
+                -DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" \
+                -DCMAKE_CXX_STANDARD=23 -DBURAQ_TEST_GLAZE=ON -DBURAQ_TEST_NLOHMANN=ON
+          cmake --build "${{ runner.temp }}/vcpkg-consumer"
+          "${{ runner.temp }}/vcpkg-consumer/test_package"
+
+  conan-package:
+    name: Conan 2 Package (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: core, C++20
+            args: -s compiler.cppstd=20
+          - label: glaze + nlohmann_json, C++23
+            args: -s compiler.cppstd=23 -o "buraq/*:with_glaze=True" -o "buraq/*:with_nlohmann_json=True"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Conan
+        run: |
+          pipx install "conan>=2"
+          conan profile detect --force
+
+      - name: conan create (runs test_package)
+        run: conan create . --build=missing ${{ matrix.args }}
+
   package-verify:
     name: CMake Install & Consumer find_package
     runs-on: ubuntu-latest

@@ -817,6 +817,15 @@ void run_cross_codec_parity_suite() {
         .mcpServers = {McpServerStdio{.name = "s", .command = "/c"}, McpServerHttp{.name = "h", .url = "u"},
                        McpServerSse{.name = "e", .url = "v", .headers = {{"k", "v"}}}},
     });
+    // Default (untagged) alternatives must not gain a `type` key on the wire (newer Glaze versions add one).
+    for (const auto& wire : {
+             buraq::GlazeCodec::encode_notification("x", SessionNewParams{.cwd = "/w", .mcpServers = {McpServerStdio{.name = "s", .command = "/c"}}}),
+             buraq::NlohmannCodec::encode_notification("x", SessionNewParams{.cwd = "/w", .mcpServers = {McpServerStdio{.name = "s", .command = "/c"}}}),
+             buraq::GlazeCodec::encode_notification("x", InitializeResult{.authMethods = {AuthMethodAgent{.id = "a", .name = "A"}}}),
+             buraq::NlohmannCodec::encode_notification("x", InitializeResult{.authMethods = {AuthMethodAgent{.id = "a", .name = "A"}}}),
+         }) {
+        CHECK(wire.find("\"type\"") == std::string::npos);
+    }
     check_cross_codec_both(SessionSetConfigOptionParams{.sessionId = "s", .configId = "c", .value = std::string("v")});
     check_cross_codec_both(SessionSetConfigOptionParams{.sessionId = "s", .configId = "c", .type = "boolean", .value = false});
     const std::vector<SessionUpdatePayload> payloads{

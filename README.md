@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/khubaibumer/buraq/actions/workflows/ci.yml/badge.svg)](https://github.com/khubaibumer/buraq/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fkhubaibumer%2Fburaq%2Fbadges%2Fcoverage.json)](https://github.com/khubaibumer/buraq/actions/workflows/ci.yml)
+[![Docs](https://github.com/khubaibumer/buraq/actions/workflows/docs.yml/badge.svg)](https://khubaibumer.github.io/buraq/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20%20%7C%2023-informational.svg)](#requirements)
 
@@ -66,6 +67,44 @@ cmake --install build --prefix /opt/buraq
 find_package(buraq CONFIG REQUIRED)
 target_link_libraries(my_agent PRIVATE buraq::buraq)
 ```
+
+### vcpkg
+
+The port lives in [`ports/buraq`](ports/buraq) until it is accepted into the vcpkg registry. Its `SHA512` is pinned after each release, so to install from a checkout, generate an overlay port that builds those sources. The `glaze` and `nlohmann-json` features pull in the matching JSON library:
+
+```bash
+git clone --branch v0.1.0 https://github.com/khubaibumer/buraq.git
+python3 buraq/scripts/vcpkg_port.py overlay vcpkg-overlay
+vcpkg install "buraq[glaze]" --overlay-ports=vcpkg-overlay
+```
+
+```cmake
+find_package(buraq CONFIG REQUIRED)
+find_package(glaze CONFIG REQUIRED)
+target_link_libraries(my_agent PRIVATE buraq::buraq glaze::glaze)
+```
+
+### Conan 2
+
+The recipe is [`conanfile.py`](conanfile.py). Options `with_glaze` and `with_nlohmann_json` add the codec dependency:
+
+```bash
+git clone --branch v0.1.0 https://github.com/khubaibumer/buraq.git
+conan create buraq -s compiler.cppstd=23 -o "buraq/*:with_glaze=True"
+```
+
+```ini
+# conanfile.txt
+[requires]
+buraq/0.1.0
+[options]
+buraq/*:with_glaze=True
+[generators]
+CMakeDeps
+CMakeToolchain
+```
+
+Both packages export the same `buraq::buraq` target as `find_package`. [`test_package/`](test_package) is the consumer smoke test CI runs against each one.
 
 ### Single header (drop-in)
 
@@ -231,6 +270,7 @@ CI runs the echo agent against the official [ACP Conformance Test Kit](https://g
 * A C++20-capable compiler (GCC 12+, Clang 16+, MSVC 19.34+); GCC 14+ / Clang 18+ recommended for C++23 features.
 * CMake 3.23+
 * Optional JSON backend: [Glaze](https://github.com/stephenberry/glaze) or [nlohmann/json](https://github.com/nlohmann/json) (fetched automatically for examples/tests when `BURAQ_FETCH_CODECS=ON`).
+* Supported codec versions: Glaze 4.4.3+ (tested with 4.4.3 and 9.1.0; Glaze itself requires C++23) and nlohmann/json 3.11.3+. Glaze 5.0.0 exactly needs `-DBURAQ_GLAZE_LEGACY_DETAIL_NAMESPACE=0`, because its version cannot be detected from its headers.
 
 ```bash
 cmake -B build -DCMAKE_CXX_STANDARD=23
@@ -246,6 +286,8 @@ ctest --test-dir build --output-on-failure
 | `BURAQ_INSTALL` | top-level only | Generate `install()` and `find_package(buraq)` export rules |
 | `BURAQ_ENABLE_COVERAGE` | `OFF` | Instrument tests/examples (GCC/Clang) and add the `buraq_coverage` target |
 | `BURAQ_COVERAGE_FAIL_UNDER_LINE` | `0` | Make `buraq_coverage` fail below this line-coverage percentage (CI uses `90`) |
+| `BURAQ_BUILD_DOCS` | `OFF` | Add the `buraq_docs` target (Doxygen API reference) |
+| `BURAQ_DOCS_WARN_AS_ERROR` | `OFF` | Make `buraq_docs` fail on any Doxygen warning, including undocumented entities (CI uses `ON`) |
 
 ### Code coverage
 
@@ -257,6 +299,17 @@ cmake --build build-cov --target buraq_coverage
 ```
 
 The target resets the counters, runs `ctest`, and prints a per-header summary. It writes `build-cov/coverage/index.html` (annotated source), `coverage.xml` (Cobertura), `summary.json`, and `summary.md`. Only `include/buraq/` is measured. CI publishes the summary for each run and uploads the HTML report as an artifact. On pushes to `main` it also refreshes the README coverage badge, which reads `coverage.json` on the `badges` branch.
+
+### API reference
+
+The API reference is published at **<https://khubaibumer.github.io/buraq/>** and is generated from the inline `///` comments in `include/buraq/`. To build it locally you need [Doxygen](https://www.doxygen.nl) (Graphviz is optional and adds class graphs):
+
+```bash
+cmake -B build-docs -DBURAQ_BUILD_DOCS=ON -DBURAQ_BUILD_EXAMPLES=OFF -DBURAQ_BUILD_TESTS=OFF
+cmake --build build-docs --target buraq_docs   # -> build-docs/docs/html/index.html
+```
+
+The `Docs` workflow builds the reference with warnings treated as errors, so every public entity must be documented. On pushes to `main` it deploys the reference to GitHub Pages.
 
 ### Smoke-Testing Over `stdio`
 
@@ -297,7 +350,8 @@ uvx --from git+https://github.com/agentclientprotocol/acp-tck@v0.4.0 acp-tck -- 
 - [x] Full stable ACP v1 surface: auth, session lifecycle (`resume`/`list`/`delete`/`close`), config options, elicitation, `$/cancel_request`, extension methods
 - [x] Official ACP conformance kit (`acp-tck`) in CI
 - [ ] Unstable ACP features (subagents, NES, providers) behind an opt-in flag
-- [ ] Packaging support for `vcpkg` and `Conan`
+- [x] Packaging support for `vcpkg` (overlay port) and `Conan` 2 (recipe + `test_package`)
+- [ ] Submit the port / recipe to the vcpkg registry and ConanCenter
 
 ---
 

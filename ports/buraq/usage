@@ -1,0 +1,10 @@
+buraq provides CMake targets:
+
+  find_package(buraq CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE buraq::buraq)
+
+  # Codecs are optional headers; link the JSON library you use (features "glaze" / "nlohmann-json"):
+  find_package(glaze CONFIG REQUIRED)            # buraq/codecs/glaze.hpp
+  target_link_libraries(main PRIVATE glaze::glaze)
+  find_package(nlohmann_json CONFIG REQUIRED)    # buraq/codecs/nlohmann.hpp
+  target_link_libraries(main PRIVATE nlohmann_json::nlohmann_json)

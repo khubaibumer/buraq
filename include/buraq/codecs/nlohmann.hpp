@@ -1,4 +1,15 @@
 #pragma once
+/// @file
+/// @brief JSON codec backed by nlohmann/json (`buraq::NlohmannCodec`).
+///
+/// Implements the buraq::JsonCodec concept with nlohmann/json: parses raw JSON-RPC 2.0 envelopes, decodes
+/// typed params/results while ignoring unknown keys (such as ACP `_meta`), and encodes requests,
+/// notifications, results and errors. Also provides ADL `to_json`/`from_json` overloads for every ACP v1
+/// schema type.
+///
+/// Requires nlohmann/json 3.11.3 or newer.
+///
+/// Usage: `class MyAgent : public buraq::AgentBase<MyAgent, buraq::NlohmannCodec> { ... };`
 
 #include <cstddef>
 #include <cstdint>
@@ -20,14 +31,22 @@ namespace buraq {
 
 namespace detail {
 
+/// @brief Converts a JSON-RPC request id (integer or string) to JSON.
+/// @param id Request id.
+/// @return JSON number or string.
 inline nlohmann::json id_to_json(const RequestId& id) {
     return std::visit([](const auto& v) -> nlohmann::json { return v; }, id);
 }
 
+/// @brief Field-level helpers used by the generated nlohmann/json `to_json`/`from_json` overloads.
 namespace nl {
 
+/// nlohmann/json document type.
 using json = nlohmann::json;
 
+/// @brief Throws std::invalid_argument unless @p j is a JSON object.
+/// @param j Value to check.
+/// @param type_name Type name used in the exception message.
 inline void expect_object(const json& j, const char* type_name) {
     if (!j.is_object()) {
         throw std::invalid_argument(std::string("expected JSON object for ") + type_name);
@@ -35,22 +54,43 @@ inline void expect_object(const json& j, const char* type_name) {
 }
 
 // --- Value writers (overloads for types without an ADL to_json) ---
+/// @brief Writes @p v into @p j via its nlohmann/json conversion.
+/// @tparam T Value type.
+/// @param j Destination.
+/// @param v Value.
 template <typename T>
 void put_value(json& j, const T& v) {
     j = v;
 }
+/// @brief Writes a string view as a JSON string.
+/// @param j Destination.
+/// @param v Value.
 inline void put_value(json& j, std::string_view v) { j = std::string(v); }
+/// @brief Writes a request id as a JSON number or string.
+/// @param j Destination.
+/// @param v Value.
 inline void put_value(json& j, const RequestId& v) { j = id_to_json(v); }
+/// @brief Writes a session config value (boolean or string).
+/// @param j Destination.
+/// @param v Value.
 inline void put_value(json& j, const v1::SessionConfigValue& v) {
     std::visit([&j](const auto& x) { j = x; }, v);
 }
 
 // --- Value readers ---
+/// @brief Reads @p j into @p v via its nlohmann/json conversion.
+/// @tparam T Value type.
+/// @param j Source.
+/// @param v Destination.
 template <typename T>
 void get_value(const json& j, T& v) {
     j.get_to(v);
 }
+/// @brief No-op: string-view discriminators are fixed by the alternative type.
 inline void get_value(const json&, std::string_view&) {} // discriminator: fixed by the alternative type
+/// @brief Reads a request id; throws std::invalid_argument unless it is an integer or a string.
+/// @param j Source.
+/// @param v Destination.
 inline void get_value(const json& j, RequestId& v) {
     if (j.is_number_integer()) {
         v = j.get<std::int64_t>();
@@ -60,6 +100,9 @@ inline void get_value(const json& j, RequestId& v) {
         throw std::invalid_argument("JSON-RPC request id must be an integer or a string");
     }
 }
+/// @brief Reads a session config value: a JSON boolean, otherwise a string.
+/// @param j Source.
+/// @param v Destination.
 inline void get_value(const json& j, v1::SessionConfigValue& v) {
     if (j.is_boolean()) {
         v = j.get<bool>();
@@ -69,19 +112,39 @@ inline void get_value(const json& j, v1::SessionConfigValue& v) {
 }
 
 // --- Object fields: absent/null keys keep defaults (mirrors GlazeCodec), unknown keys are ignored ---
+/// @brief Writes member @p key of object @p j.
+/// @tparam T Value type.
+/// @param j Destination object.
+/// @param key Member name.
+/// @param v Value.
 template <typename T>
 void put(json& j, const char* key, const T& v) {
     put_value(j[key], v);
 }
+/// @brief Writes member @p key only when @p v holds a value.
+/// @tparam T Value type.
+/// @param j Destination object.
+/// @param key Member name.
+/// @param v Optional value.
 template <typename T>
 void put(json& j, const char* key, const std::optional<T>& v) {
     if (v) put_value(j[key], *v);
 }
 
+/// @brief Reads member @p key into @p v; an absent or null member keeps the current value.
+/// @tparam T Value type.
+/// @param j Source object.
+/// @param key Member name.
+/// @param v Destination.
 template <typename T>
 void get(const json& j, const char* key, T& v) {
     if (auto it = j.find(key); it != j.end() && !it->is_null()) get_value(*it, v);
 }
+/// @brief Reads optional member @p key; an absent or null member resets @p v.
+/// @tparam T Value type.
+/// @param j Source object.
+/// @param key Member name.
+/// @param v Destination.
 template <typename T>
 void get(const json& j, const char* key, std::optional<T>& v) {
     if (auto it = j.find(key); it != j.end() && !it->is_null()) {
@@ -94,11 +157,25 @@ void get(const json& j, const char* key, std::optional<T>& v) {
 }
 
 // --- Tagged unions (discriminators from buraq::v1::variant_tag) ---
+/// @brief Assigns alternative @p index of @p v from @p j.
+/// @tparam Variant std::variant type.
+/// @tparam I Alternative indices.
+/// @param j Source.
+/// @param v Destination.
+/// @param index Alternative to read.
 template <typename Variant, std::size_t... I>
 void read_alternative(const json& j, Variant& v, std::size_t index, std::index_sequence<I...>) {
     ((index == I ? void(v = j.get<std::variant_alternative_t<I, Variant>>()) : void()), ...);
 }
 
+/// @brief Reads a tagged union, selecting the alternative by its discriminator.
+///
+/// A missing or null tag selects the untagged alternative if the union has one; otherwise, as for an
+/// unknown tag, std::invalid_argument is thrown.
+/// @tparam Variant std::variant with a buraq::v1::variant_tag specialization.
+/// @param j Source object.
+/// @param v Destination.
+/// @param type_name Type name used in error messages.
 template <typename Variant>
 void read_tagged(const json& j, Variant& v, const char* type_name) {
     using Tag = v1::variant_tag<Variant>;
@@ -124,6 +201,10 @@ void read_tagged(const json& j, Variant& v, const char* type_name) {
     read_alternative(j, v, index, std::make_index_sequence<std::variant_size_v<Variant>>{});
 }
 
+/// @brief Writes the active alternative of a tagged union (each alternative carries its own tag).
+/// @tparam Variant std::variant type.
+/// @param j Destination.
+/// @param v Value.
 template <typename Variant>
 void write_tagged(json& j, const Variant& v) {
     std::visit([&j](const auto& alt) { j = alt; }, v);
@@ -134,13 +215,20 @@ void write_tagged(json& j, const Variant& v) {
 } // namespace detail
 
 // Raw JSON passthrough (empty text encodes as `null`)
+/// @brief Serializes RawJson by parsing its text; empty text encodes as `null`.
+/// @param j Destination.
+/// @param v Value.
 inline void to_json(nlohmann::json& j, const RawJson& v) {
     j = v.json.empty() ? nlohmann::json(nullptr) : nlohmann::json::parse(v.json);
 }
+/// @brief Captures any JSON value as its serialized text.
+/// @param j Source.
+/// @param v Destination.
 inline void from_json(const nlohmann::json& j, RawJson& v) {
     v.json = j.dump();
 }
 
+/// @cond INTERNAL
 #define BURAQ_NL_EXPAND(x) x
 #define BURAQ_NL_FE_1(M, a) M(a)
 #define BURAQ_NL_FE_2(M, a, ...) M(a) BURAQ_NL_EXPAND(BURAQ_NL_FE_1(M, __VA_ARGS__))
@@ -186,20 +274,33 @@ inline void from_json(const nlohmann::json& j, RawJson& v) {
     inline void to_json(nlohmann::json& j, const Type& v) { ::buraq::detail::nl::write_tagged(j, v); } \
     inline void from_json(const nlohmann::json& j, Type& v) { ::buraq::detail::nl::read_tagged(j, v, #Type); }
 
+/// @endcond
 namespace v1 {
 
 // Tagged unions are recursive (ContentBlock inside ToolCallContent, etc.): declare up front
+/// @brief Serializes a ContentBlock (tagged by `type`).
 inline void to_json(nlohmann::json& j, const ContentBlock& v);
+/// @brief Deserializes a ContentBlock (tagged by `type`).
 inline void from_json(const nlohmann::json& j, ContentBlock& v);
+/// @brief Serializes a ToolCallContent (tagged by `type`).
 inline void to_json(nlohmann::json& j, const ToolCallContent& v);
+/// @brief Deserializes a ToolCallContent (tagged by `type`).
 inline void from_json(const nlohmann::json& j, ToolCallContent& v);
+/// @brief Serializes a SessionUpdatePayload (tagged by `sessionUpdate`).
 inline void to_json(nlohmann::json& j, const SessionUpdatePayload& v);
+/// @brief Deserializes a SessionUpdatePayload (tagged by `sessionUpdate`).
 inline void from_json(const nlohmann::json& j, SessionUpdatePayload& v);
+/// @brief Serializes a PermissionOutcome (tagged by `outcome`).
 inline void to_json(nlohmann::json& j, const PermissionOutcome& v);
+/// @brief Deserializes a PermissionOutcome (tagged by `outcome`).
 inline void from_json(const nlohmann::json& j, PermissionOutcome& v);
+/// @brief Serializes a McpServer (untagged stdio by default).
 inline void to_json(nlohmann::json& j, const McpServer& v);
+/// @brief Deserializes a McpServer (missing `type` selects stdio).
 inline void from_json(const nlohmann::json& j, McpServer& v);
+/// @brief Serializes an AuthMethod (untagged agent method by default).
 inline void to_json(nlohmann::json& j, const AuthMethod& v);
+/// @brief Deserializes an AuthMethod (missing `type` selects the agent method).
 inline void from_json(const nlohmann::json& j, AuthMethod& v);
 
 // --- Capabilities & Metadata ---
@@ -216,6 +317,7 @@ BURAQ_NL_TYPE(SystemPromptModeCapabilities, override)
 BURAQ_NL_TYPE(SystemPromptCapabilities, mode)
 
 // `delete` is a C++ keyword; the member is spelled `delete_`
+/// @brief Serializes SessionCapabilities, mapping member `delete_` to key `delete`.
 inline void to_json(nlohmann::json& j, const SessionCapabilities& v) {
     j = nlohmann::json::object();
     ::buraq::detail::nl::put(j, "list", v.list);
@@ -225,6 +327,7 @@ inline void to_json(nlohmann::json& j, const SessionCapabilities& v) {
     ::buraq::detail::nl::put(j, "resume", v.resume);
     ::buraq::detail::nl::put(j, "close", v.close);
 }
+/// @brief Deserializes SessionCapabilities, mapping key `delete` to member `delete_`.
 inline void from_json(const nlohmann::json& j, SessionCapabilities& v) {
     ::buraq::detail::nl::expect_object(j, "SessionCapabilities");
     ::buraq::detail::nl::get(j, "list", v.list);
@@ -392,7 +495,17 @@ BURAQ_NL_EMPTY(TerminalReleaseResult)
 #undef BURAQ_NL_EMPTY
 #undef BURAQ_NL_TAGGED
 
+/// @brief buraq::JsonCodec implementation backed by nlohmann/json.
+///
+/// Stateless; all members are static. Unknown keys are ignored on read and empty optionals are omitted on write.
 struct NlohmannCodec {
+    /// @brief Parses the top-level JSON-RPC 2.0 envelope of one frame without decoding the payload.
+    ///
+    /// `method`, `params` and `result` are copied into thread-local buffers, so the returned views stay valid
+    /// only until the next call on the same thread.
+    /// @param frame One NDJSON frame (without the trailing newline).
+    /// @return The envelope; RpcError::parse_error() when the frame is not a JSON object, or
+    /// RpcError::invalid_request() when `jsonrpc` is not "2.0" or `id` is neither integer nor string.
     static expected<RawEnvelope, RpcError> parse_envelope(std::span<const std::byte> frame) {
         thread_local std::string method_buf;
         thread_local std::string params_buf;
@@ -453,6 +566,11 @@ struct NlohmannCodec {
         return env;
     }
 
+    /// @brief Decodes a typed params/result payload.
+    /// @tparam T Target type.
+    /// @param json Raw JSON text; empty text yields `T{}` when T is default-constructible.
+    /// @return The decoded value, or RpcError::invalid_params() on empty input (non-default-constructible T) or
+    /// any parse/conversion exception (its `what()` becomes the message).
     template <typename T>
     static expected<T, RpcError> decode(std::string_view json) {
         if (json.empty()) {
@@ -470,6 +588,12 @@ struct NlohmannCodec {
         }
     }
 
+    /// @brief Encodes a JSON-RPC request.
+    /// @tparam T Params type.
+    /// @param id Request id.
+    /// @param method Method name.
+    /// @param val Params.
+    /// @return Compact JSON text (no trailing newline).
     template <typename T>
     static std::string encode_request(const RequestId& id, std::string_view method, const T& val) {
         nlohmann::json j{
@@ -481,6 +605,11 @@ struct NlohmannCodec {
         return j.dump();
     }
 
+    /// @brief Encodes a JSON-RPC notification.
+    /// @tparam T Params type.
+    /// @param method Method name.
+    /// @param val Params.
+    /// @return Compact JSON text (no trailing newline).
     template <typename T>
     static std::string encode_notification(std::string_view method, const T& val) {
         nlohmann::json j{
@@ -491,6 +620,11 @@ struct NlohmannCodec {
         return j.dump();
     }
 
+    /// @brief Encodes a JSON-RPC success response.
+    /// @tparam T Result type.
+    /// @param id Id of the request being answered.
+    /// @param val Result.
+    /// @return Compact JSON text (no trailing newline).
     template <typename T>
     static std::string encode_result(const RequestId& id, const T& val) {
         nlohmann::json j{
@@ -501,6 +635,10 @@ struct NlohmannCodec {
         return j.dump();
     }
 
+    /// @brief Encodes a JSON-RPC error response.
+    /// @param id Id of the request being answered.
+    /// @param err Error; a non-empty RpcError::data_json is embedded as JSON `data` (as a string if it is not valid JSON).
+    /// @return Compact JSON text (no trailing newline).
     static std::string encode_error(const RequestId& id, const RpcError& err) {
         nlohmann::json err_obj{
             {"code", err.code},

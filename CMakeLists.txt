@@ -9,12 +9,17 @@ option(BURAQ_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
 option(BURAQ_FETCH_CODECS "Fetch Glaze / nlohmann_json automatically if not found" ON)
 option(BURAQ_INSTALL "Generate install and CMake package export rules" ${PROJECT_IS_TOP_LEVEL})
 option(BURAQ_ENABLE_COVERAGE "Instrument tests/examples and add the buraq_coverage target (GCC/Clang + gcovr)" OFF)
+option(BURAQ_BUILD_DOCS "Add the buraq_docs target (Doxygen API reference)" OFF)
 
 if(BURAQ_ENABLE_COVERAGE)
     if(NOT BURAQ_BUILD_TESTS)
         message(FATAL_ERROR "BURAQ_ENABLE_COVERAGE requires BURAQ_BUILD_TESTS=ON")
     endif()
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuraqCoverage.cmake")
+endif()
+
+if(BURAQ_BUILD_DOCS)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuraqDocs.cmake")
 endif()
 
 # --- Core Header-Only Library (Zero External Dependencies) ---
@@ -66,6 +71,7 @@ if(BURAQ_INSTALL)
             "${CMAKE_CURRENT_BINARY_DIR}/buraqConfigVersion.cmake"
             VERSION ${PROJECT_VERSION}
             COMPATIBILITY SameMajorVersion
+            ARCH_INDEPENDENT
     )
 
     install(FILES

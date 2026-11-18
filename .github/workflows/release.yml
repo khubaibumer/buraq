@@ -87,6 +87,17 @@ jobs:
           git archive --format=tar.gz --prefix="buraq-${TAG}/" "$TAG" -o "buraq-${TAG}.tar.gz"
           git archive --format=zip --prefix="buraq-${TAG}/" "$TAG" -o "buraq-${TAG}.zip"
 
+      - name: vcpkg Port SHA512
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          SHA=$(curl -fsSL "https://github.com/${{ github.repository }}/archive/${TAG}.tar.gz" | sha512sum | cut -d' ' -f1)
+          {
+            echo "### vcpkg port"
+            echo "Pin \`ports/buraq/portfile.cmake\` with \`python3 scripts/vcpkg_port.py pin\` or set:"
+            echo "\`SHA512 ${SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:

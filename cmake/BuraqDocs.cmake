@@ -1,0 +1,54 @@
+# API reference for buraq's public headers, generated with Doxygen from the inline `///` comments.
+#
+#   cmake -B build-docs -DBURAQ_BUILD_DOCS=ON -DBURAQ_BUILD_EXAMPLES=OFF -DBURAQ_BUILD_TESTS=OFF
+#   cmake --build build-docs --target buraq_docs      # -> build-docs/docs/html/index.html
+#
+# BURAQ_DOCS_WARN_AS_ERROR=ON fails the target on any Doxygen warning, including undocumented entities.
+
+find_package(Doxygen REQUIRED OPTIONAL_COMPONENTS dot)
+
+set(BURAQ_DOCS_WARN_AS_ERROR OFF CACHE BOOL "Fail buraq_docs on Doxygen warnings (e.g. undocumented entities)")
+
+set(DOXYGEN_PROJECT_NAME "buraq")
+set(DOXYGEN_PROJECT_NUMBER "${PROJECT_VERSION}")
+set(DOXYGEN_PROJECT_BRIEF "Header-only C++20/23 SDK for the Agent Client Protocol (ACP) v1")
+set(DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/docs")
+set(DOXYGEN_USE_MDFILE_AS_MAINPAGE "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+set(DOXYGEN_STRIP_FROM_PATH "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(DOXYGEN_STRIP_FROM_INC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(DOXYGEN_FULL_PATH_NAMES YES)
+set(DOXYGEN_JAVADOC_AUTOBRIEF YES)
+set(DOXYGEN_EXTRACT_ALL NO)
+set(DOXYGEN_EXTRACT_STATIC YES)
+set(DOXYGEN_WARN_IF_UNDOCUMENTED YES)
+set(DOXYGEN_WARN_NO_PARAMDOC NO)
+set(DOXYGEN_EXCLUDE_SYMBOLS "glz" "glz::*" "nlohmann" "nlohmann::*" "BURAQ_GLZ_*" "BURAQ_NLO_*")
+set(DOXYGEN_ENABLE_PREPROCESSING YES)
+set(DOXYGEN_MACRO_EXPANSION NO)
+set(DOXYGEN_PREDEFINED "BURAQ_HAS_STD_GENERATOR=1" "BURAQ_DOXYGEN=1")
+set(DOXYGEN_MARKDOWN_ID_STYLE GITHUB)
+set(DOXYGEN_TOC_INCLUDE_HEADINGS 3)
+set(DOXYGEN_GENERATE_TREEVIEW YES)
+set(DOXYGEN_HTML_COLORSTYLE "TOGGLE")
+set(DOXYGEN_SORT_MEMBER_DOCS NO)
+set(DOXYGEN_GENERATE_LATEX NO)
+set(DOXYGEN_QUIET YES)
+set(DOXYGEN_WARN_LOGFILE "${CMAKE_CURRENT_BINARY_DIR}/docs/doxygen-warnings.log")
+if(BURAQ_DOCS_WARN_AS_ERROR)
+    set(DOXYGEN_WARN_AS_ERROR "FAIL_ON_WARNINGS")
+endif()
+if(DOXYGEN_DOT_FOUND)
+    set(DOXYGEN_HAVE_DOT YES)
+    set(DOXYGEN_CLASS_GRAPH YES)
+    set(DOXYGEN_COLLABORATION_GRAPH NO)
+    set(DOXYGEN_DOT_IMAGE_FORMAT "svg")
+endif()
+
+doxygen_add_docs(buraq_docs
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/buraq"
+        "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CONTRIBUTING.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SECURITY.md"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMENT "Generating buraq API reference (Doxygen) -> ${CMAKE_CURRENT_BINARY_DIR}/docs/html")

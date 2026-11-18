@@ -4,3 +4,7 @@ package*.json
 build*/
 cmake-build-*/
 .awb/
+CMakeUserPresets.json
+test_package/build/
+vcpkg_installed/
+__pycache__/
