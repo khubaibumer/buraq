@@ -4,7 +4,7 @@ vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO khubaibumer/buraq
     REF "v${VERSION}"
-    SHA512 0
+    SHA512 dd77bb799a33149d95cc5c0287727dc9d88fd6d5bdfc785603410d309f268c1c947d3e854bca15df4e2f7dd1860dd6c00f01482be24a3e67920eda77b22823b2
     HEAD_REF main
 )
 

@@ -5,7 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [0.1.0] - Unreleased
+### Changed
+
+- vcpkg port pinned to the `v0.1.0` release archive (SHA512).
+
+## [0.1.0] - 2026-11-18
 
 First release targeting the complete **stable ACP v1** surface. It is CONFORMANT on the official `acp-tck` v0.4.0, and its wire output is verified against `@agentclientprotocol/sdk`.
 

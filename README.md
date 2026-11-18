@@ -10,6 +10,8 @@
 
 `buraq` bridges native C++ applications (IDEs, game engines, terminals, custom editors) and local or remote AI coding agents over JSON-RPC 2.0—without vtables, heap-allocated callback maps, or event-loop lock-in.
 
+📖 **API reference:** <https://khubaibumer.github.io/buraq/>
+
 ---
 
 ## Why `buraq`?
@@ -70,13 +72,14 @@ target_link_libraries(my_agent PRIVATE buraq::buraq)
 
 ### vcpkg
 
-The port lives in [`ports/buraq`](ports/buraq) until it is accepted into the vcpkg registry. Its `SHA512` is pinned after each release, so to install from a checkout, generate an overlay port that builds those sources. The `glaze` and `nlohmann-json` features pull in the matching JSON library:
+The port lives in [`ports/buraq`](ports/buraq) until it is accepted into the vcpkg registry. It is pinned to the `v0.1.0` release archive, so use it as an overlay port. The `glaze` and `nlohmann-json` features pull in the matching JSON library:
 
 ```bash
-git clone --branch v0.1.0 https://github.com/khubaibumer/buraq.git
-python3 buraq/scripts/vcpkg_port.py overlay vcpkg-overlay
-vcpkg install "buraq[glaze]" --overlay-ports=vcpkg-overlay
+git clone https://github.com/khubaibumer/buraq.git   # main carries the pinned port
+vcpkg install "buraq[glaze]" --overlay-ports=buraq/ports
 ```
+
+To build unreleased changes from a checkout instead, generate an overlay that points at the local sources: `python3 buraq/scripts/vcpkg_port.py overlay vcpkg-overlay`, then pass `--overlay-ports=vcpkg-overlay`.
 
 ```cmake
 find_package(buraq CONFIG REQUIRED)
