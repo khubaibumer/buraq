@@ -39,222 +39,227 @@
 #include <variant>
 
 namespace buraq {
-
-namespace detail {
-
-/// @brief Converts a JSON-RPC request id (integer or string) to JSON.
-/// @param id Request id.
-/// @return JSON number or string.
-inline nlohmann::json id_to_json(const RequestId& id) {
-    return std::visit([](const auto& v) -> nlohmann::json { return v; }, id);
-}
-
-/// @brief Field-level helpers used by the generated nlohmann/json `to_json`/`from_json` overloads.
-namespace nl {
-
-/// nlohmann/json document type.
-using json = nlohmann::json;
-
-/// @brief Throws std::invalid_argument unless @p j is a JSON object.
-/// @param j Value to check.
-/// @param type_name Type name used in the exception message.
-inline void expect_object(const json& j, const char* type_name) {
-    if (!j.is_object()) {
-        throw std::invalid_argument(std::string("expected JSON object for ") + type_name);
-    }
-}
-
-// --- Value writers (overloads for types without an ADL to_json) ---
-/// @brief Writes @p v into @p j via its nlohmann/json conversion.
-/// @tparam T Value type.
-/// @param j Destination.
-/// @param v Value.
-template <typename T>
-void put_value(json& j, const T& v) {
-    j = v;
-}
-/// @brief Writes a string view as a JSON string.
-/// @param j Destination.
-/// @param v Value.
-inline void put_value(json& j, std::string_view v) { j = std::string(v); }
-/// @brief Writes a request id as a JSON number or string.
-/// @param j Destination.
-/// @param v Value.
-inline void put_value(json& j, const RequestId& v) { j = id_to_json(v); }
-/// @brief Writes a session config value (boolean or string).
-/// @param j Destination.
-/// @param v Value.
-inline void put_value(json& j, const v1::SessionConfigValue& v) {
-    std::visit([&j](const auto& x) { j = x; }, v);
-}
-
-// --- Value readers ---
-/// @brief Reads @p j into @p v via its nlohmann/json conversion.
-/// @tparam T Value type.
-/// @param j Source.
-/// @param v Destination.
-template <typename T>
-void get_value(const json& j, T& v) {
-    j.get_to(v);
-}
-/// @brief No-op: string-view discriminators are fixed by the alternative type.
-inline void get_value(const json&, std::string_view&) {} // discriminator: fixed by the alternative type
-/// @brief Reads a request id; throws std::invalid_argument unless it is an integer or a string.
-/// @param j Source.
-/// @param v Destination.
-inline void get_value(const json& j, RequestId& v) {
-    if (j.is_number_integer()) {
-        v = j.get<std::int64_t>();
-    } else if (j.is_string()) {
-        v = j.get<std::string>();
-    } else {
-        throw std::invalid_argument("JSON-RPC request id must be an integer or a string");
-    }
-}
-/// @brief Reads a session config value: a JSON boolean, otherwise a string.
-/// @param j Source.
-/// @param v Destination.
-inline void get_value(const json& j, v1::SessionConfigValue& v) {
-    if (j.is_boolean()) {
-        v = j.get<bool>();
-    } else {
-        v = j.get<std::string>();
-    }
-}
-
-// --- Object fields: absent/null keys keep defaults (mirrors GlazeCodec), unknown keys are ignored ---
-/// @brief Writes member @p key of object @p j.
-/// @tparam T Value type.
-/// @param j Destination object.
-/// @param key Member name.
-/// @param v Value.
-template <typename T>
-void put(json& j, const char* key, const T& v) {
-    put_value(j[key], v);
-}
-/// @brief Writes member @p key only when @p v holds a value.
-/// @tparam T Value type.
-/// @param j Destination object.
-/// @param key Member name.
-/// @param v Optional value.
-template <typename T>
-void put(json& j, const char* key, const std::optional<T>& v) {
-    if (v) put_value(j[key], *v);
-}
-
-/// @brief Reads member @p key into @p v; an absent or null member keeps the current value.
-/// @tparam T Value type.
-/// @param j Source object.
-/// @param key Member name.
-/// @param v Destination.
-template <typename T>
-void get(const json& j, const char* key, T& v) {
-    if (auto it = j.find(key); it != j.end() && !it->is_null()) get_value(*it, v);
-}
-/// @brief Reads optional member @p key; an absent or null member resets @p v.
-/// @tparam T Value type.
-/// @param j Source object.
-/// @param key Member name.
-/// @param v Destination.
-template <typename T>
-void get(const json& j, const char* key, std::optional<T>& v) {
-    if (auto it = j.find(key); it != j.end() && !it->is_null()) {
-        T tmp{};
-        get_value(*it, tmp);
-        v = std::move(tmp);
-    } else {
-        v.reset();
-    }
-}
-
-// --- Tagged unions (discriminators from buraq::v1::variant_tag) ---
-/// @brief Assigns alternative @p index of @p v from @p j.
-/// @tparam Variant std::variant type.
-/// @tparam I Alternative indices.
-/// @param j Source.
-/// @param v Destination.
-/// @param index Alternative to read.
-template <typename Variant, std::size_t... I>
-void read_alternative(const json& j, Variant& v, std::size_t index, std::index_sequence<I...>) {
-    ((index == I ? void(v = j.get<std::variant_alternative_t<I, Variant>>()) : void()), ...);
-}
-
-/// @brief Reads a tagged union, selecting the alternative by its discriminator.
-///
-/// A missing or null tag selects the untagged alternative if the union has one, otherwise
-/// std::invalid_argument is thrown. An unrecognized tag yields buraq::v1::Unknown holding the raw object.
-/// @tparam Variant std::variant with a buraq::v1::variant_tag specialization.
-/// @param j Source object.
-/// @param v Destination.
-/// @param type_name Type name used in error messages.
-template <typename Variant>
-void read_tagged(const json& j, Variant& v, const char* type_name) {
-    using Tag = v1::variant_tag<Variant>;
-    expect_object(j, type_name);
-    std::size_t index = Tag::ids.size();
-    const auto it = j.find(std::string(Tag::key));
-    if (it == j.end() || it->is_null()) {
-        if constexpr (Tag::untagged >= 0) {
-            index = static_cast<std::size_t>(Tag::untagged);
-        } else {
-            throw std::invalid_argument(std::string(type_name) + ": missing \"" + std::string(Tag::key) + "\"");
+    namespace detail {
+        /// @brief Converts a JSON-RPC request id (integer or string) to JSON.
+        /// @param id Request id.
+        /// @return JSON number or string.
+        inline nlohmann::json id_to_json(const RequestId &id) {
+            return std::visit([](const auto &v) -> nlohmann::json { return v; }, id);
         }
-    } else {
-        const auto tag = it->template get<std::string>();
-        for (std::size_t i = 0; i < Tag::ids.size(); ++i) {
-            if (Tag::ids[i] == tag) index = i;
-        }
-        if (index == Tag::ids.size()) {
-            v = v1::Unknown{tag, RawJson{j.dump()}};
-            return;
-        }
-    }
-    read_alternative(j, v, index, std::make_index_sequence<Tag::ids.size()>{});
-}
 
-/// @brief Writes the active alternative of a tagged union (each alternative carries its own tag).
-///
-/// buraq::v1::Unknown is written back verbatim (or as `{key: tag}` when it has no raw JSON).
-/// @tparam Variant std::variant type.
-/// @param j Destination.
-/// @param v Value.
-template <typename Variant>
-void write_tagged(json& j, const Variant& v) {
-    std::visit(
-        [&j](const auto& alt) {
-            if constexpr (std::is_same_v<std::decay_t<decltype(alt)>, v1::Unknown>) {
-                if (alt.raw.json.empty()) {
-                    j = json::object();
-                    j[std::string(v1::variant_tag<Variant>::key)] = alt.tag;
-                } else {
-                    j = json::parse(alt.raw.json);
+        /// @brief Field-level helpers used by the generated nlohmann/json `to_json`/`from_json` overloads.
+        namespace nl {
+            /// nlohmann/json document type.
+            using json = nlohmann::json;
+
+            /// @brief Throws std::invalid_argument unless @p j is a JSON object.
+            /// @param j Value to check.
+            /// @param type_name Type name used in the exception message.
+            inline void expect_object(const json &j, const char *type_name) {
+                if (!j.is_object()) {
+                    throw std::invalid_argument(std::string("expected JSON object for ") + type_name);
                 }
-            } else {
-                j = alt;
             }
-        },
-        v);
-}
 
-} // namespace nl
+            // --- Value writers (overloads for types without an ADL to_json) ---
+            /// @brief Writes @p v into @p j via its nlohmann/json conversion.
+            /// @tparam T Value type.
+            /// @param j Destination.
+            /// @param v Value.
+            template<typename T>
+            void put_value(json &j, const T &v) {
+                j = v;
+            }
 
-} // namespace detail
+            /// @brief Writes a string view as a JSON string.
+            /// @param j Destination.
+            /// @param v Value.
+            inline void put_value(json &j, std::string_view v) { j = std::string(v); }
+            /// @brief Writes a request id as a JSON number or string.
+            /// @param j Destination.
+            /// @param v Value.
+            inline void put_value(json &j, const RequestId &v) { j = id_to_json(v); }
+            /// @brief Writes a session config value (boolean or string).
+            /// @param j Destination.
+            /// @param v Value.
+            inline void put_value(json &j, const v1::SessionConfigValue &v) {
+                std::visit([&j](const auto &x) { j = x; }, v);
+            }
 
-// Raw JSON passthrough (empty text encodes as `null`)
-/// @brief Serializes RawJson by parsing its text; empty text encodes as `null`.
-/// @param j Destination.
-/// @param v Value.
-inline void to_json(nlohmann::json& j, const RawJson& v) {
-    j = v.json.empty() ? nlohmann::json(nullptr) : nlohmann::json::parse(v.json);
-}
-/// @brief Captures any JSON value as its serialized text.
-/// @param j Source.
-/// @param v Destination.
-inline void from_json(const nlohmann::json& j, RawJson& v) {
-    v.json = j.dump();
-}
+            // --- Value readers ---
+            /// @brief Reads @p j into @p v via its nlohmann/json conversion.
+            /// @tparam T Value type.
+            /// @param j Source.
+            /// @param v Destination.
+            template<typename T>
+            void get_value(const json &j, T &v) {
+                j.get_to(v);
+            }
 
-/// @cond INTERNAL
+            /// @brief No-op: string-view discriminators are fixed by the alternative type.
+            inline void get_value(const json &, std::string_view &) {
+            } // discriminator: fixed by the alternative type
+            /// @brief Reads a request id; throws std::invalid_argument unless it is an integer or a string.
+            /// @param j Source.
+            /// @param v Destination.
+            inline void get_value(const json &j, RequestId &v) {
+                if (j.is_number_integer()) {
+                    v = j.get<std::int64_t>();
+                } else if (j.is_string()) {
+                    v = j.get<std::string>();
+                } else {
+                    throw std::invalid_argument("JSON-RPC request id must be an integer or a string");
+                }
+            }
+
+            /// @brief Reads a session config value: a JSON boolean, otherwise a string.
+            /// @param j Source.
+            /// @param v Destination.
+            inline void get_value(const json &j, v1::SessionConfigValue &v) {
+                if (j.is_boolean()) {
+                    v = j.get<bool>();
+                } else {
+                    v = j.get<std::string>();
+                }
+            }
+
+            // --- Object fields: absent/null keys keep defaults (mirrors GlazeCodec), unknown keys are ignored ---
+            /// @brief Writes member @p key of object @p j.
+            /// @tparam T Value type.
+            /// @param j Destination object.
+            /// @param key Member name.
+            /// @param v Value.
+            template<typename T>
+            void put(json &j, const char *key, const T &v) {
+                put_value(j[key], v);
+            }
+
+            /// @brief Writes member @p key only when @p v holds a value.
+            /// @tparam T Value type.
+            /// @param j Destination object.
+            /// @param key Member name.
+            /// @param v Optional value.
+            template<typename T>
+            void put(json &j, const char *key, const std::optional<T> &v) {
+                if (v) put_value(j[key], *v);
+            }
+
+            /// @brief Reads member @p key into @p v; an absent or null member keeps the current value.
+            /// @tparam T Value type.
+            /// @param j Source object.
+            /// @param key Member name.
+            /// @param v Destination.
+            template<typename T>
+            void get(const json &j, const char *key, T &v) {
+                if (auto it = j.find(key); it != j.end() && !it->is_null()) get_value(*it, v);
+            }
+
+            /// @brief Reads optional member @p key; an absent or null member resets @p v.
+            /// @tparam T Value type.
+            /// @param j Source object.
+            /// @param key Member name.
+            /// @param v Destination.
+            template<typename T>
+            void get(const json &j, const char *key, std::optional<T> &v) {
+                if (auto it = j.find(key); it != j.end() && !it->is_null()) {
+                    T tmp{};
+                    get_value(*it, tmp);
+                    v = std::move(tmp);
+                } else {
+                    v.reset();
+                }
+            }
+
+            // --- Tagged unions (discriminators from buraq::v1::variant_tag) ---
+            /// @brief Assigns alternative @p index of @p v from @p j.
+            /// @tparam Variant std::variant type.
+            /// @tparam I Alternative indices.
+            /// @param j Source.
+            /// @param v Destination.
+            /// @param index Alternative to read.
+            template<typename Variant, std::size_t... I>
+            void read_alternative(const json &j, Variant &v, std::size_t index, std::index_sequence<I...>) {
+                ((index == I ? void(v = j.get<std::variant_alternative_t<I, Variant> >()) : void()), ...);
+            }
+
+            /// @brief Reads a tagged union, selecting the alternative by its discriminator.
+            ///
+            /// A missing or null tag selects the untagged alternative if the union has one, otherwise
+            /// std::invalid_argument is thrown. An unrecognized tag yields buraq::v1::Unknown holding the raw object.
+            /// @tparam Variant std::variant with a buraq::v1::variant_tag specialization.
+            /// @param j Source object.
+            /// @param v Destination.
+            /// @param type_name Type name used in error messages.
+            template<typename Variant>
+            void read_tagged(const json &j, Variant &v, const char *type_name) {
+                using Tag = v1::variant_tag<Variant>;
+                expect_object(j, type_name);
+                std::size_t index = Tag::ids.size();
+                const auto it = j.find(std::string(Tag::key));
+                if (it == j.end() || it->is_null()) {
+                    if constexpr (Tag::untagged >= 0) {
+                        index = static_cast<std::size_t>(Tag::untagged);
+                    } else {
+                        throw std::invalid_argument(
+                            std::string(type_name) + ": missing \"" + std::string(Tag::key) + "\"");
+                    }
+                } else {
+                    const auto tag = it->template get<std::string>();
+                    for (std::size_t i = 0; i < Tag::ids.size(); ++i) {
+                        if (Tag::ids[i] == tag) index = i;
+                    }
+                    if (index == Tag::ids.size()) {
+                        v = v1::Unknown{tag, RawJson{j.dump()}};
+                        return;
+                    }
+                }
+                read_alternative(j, v, index, std::make_index_sequence < Tag::ids.size() >
+                {
+                });
+            }
+
+            /// @brief Writes the active alternative of a tagged union (each alternative carries its own tag).
+            ///
+            /// buraq::v1::Unknown is written back verbatim (or as `{key: tag}` when it has no raw JSON).
+            /// @tparam Variant std::variant type.
+            /// @param j Destination.
+            /// @param v Value.
+            template<typename Variant>
+            void write_tagged(json &j, const Variant &v) {
+                std::visit(
+                    [&j](const auto &alt) {
+                        if constexpr (std::is_same_v<std::decay_t<decltype(alt)>, v1::Unknown>) {
+                            if (alt.raw.json.empty()) {
+                                j = json::object();
+                                j[std::string(v1::variant_tag<Variant>::key)] = alt.tag;
+                            } else {
+                                j = json::parse(alt.raw.json);
+                            }
+                        } else {
+                            j = alt;
+                        }
+                    },
+                    v);
+            }
+        } // namespace nl
+    } // namespace detail
+
+    // Raw JSON passthrough (empty text encodes as `null`)
+    /// @brief Serializes RawJson by parsing its text; empty text encodes as `null`.
+    /// @param j Destination.
+    /// @param v Value.
+    inline void to_json(nlohmann::json &j, const RawJson &v) {
+        j = v.json.empty() ? nlohmann::json(nullptr) : nlohmann::json::parse(v.json);
+    }
+
+    /// @brief Captures any JSON value as its serialized text.
+    /// @param j Source.
+    /// @param v Destination.
+    inline void from_json(const nlohmann::json &j, RawJson &v) {
+        v.json = j.dump();
+    }
+
+    /// @cond INTERNAL
 #define BURAQ_NL_EXPAND(x) x
 #define BURAQ_NL_FE_1(M, a) M(a)
 #define BURAQ_NL_FE_2(M, a, ...) M(a) BURAQ_NL_EXPAND(BURAQ_NL_FE_1(M, __VA_ARGS__))
@@ -289,7 +294,7 @@ inline void from_json(const nlohmann::json& j, RawJson& v) {
         BURAQ_NL_EXPAND(BURAQ_NL_FOR_EACH(BURAQ_NL_GET, __VA_ARGS__))           \
     }
 
-// Field-less types (only `_meta`): encode as `{}`, accept `{}` or `null`
+    // Field-less types (only `_meta`): encode as `{}`, accept `{}` or `null`
 #define BURAQ_NL_EMPTY(Type)                                                     \
     inline void to_json(nlohmann::json& j, const Type& v) {                     \
         j = nlohmann::json::object();                                           \
@@ -305,210 +310,226 @@ inline void from_json(const nlohmann::json& j, RawJson& v) {
     inline void to_json(nlohmann::json& j, const Type& v) { ::buraq::detail::nl::write_tagged(j, v); } \
     inline void from_json(const nlohmann::json& j, Type& v) { ::buraq::detail::nl::read_tagged(j, v, #Type); }
 
-/// @endcond
-namespace v1 {
+    /// @endcond
+    namespace v1 {
+        // Tagged unions are recursive (ContentBlock inside ToolCallContent, etc.): declare up front
+        /// @brief Serializes a ContentBlock (tagged by `type`).
+        inline void to_json(nlohmann::json &j, const ContentBlock &v);
 
-// Tagged unions are recursive (ContentBlock inside ToolCallContent, etc.): declare up front
-/// @brief Serializes a ContentBlock (tagged by `type`).
-inline void to_json(nlohmann::json& j, const ContentBlock& v);
-/// @brief Deserializes a ContentBlock (tagged by `type`).
-inline void from_json(const nlohmann::json& j, ContentBlock& v);
-/// @brief Serializes a ToolCallContent (tagged by `type`).
-inline void to_json(nlohmann::json& j, const ToolCallContent& v);
-/// @brief Deserializes a ToolCallContent (tagged by `type`).
-inline void from_json(const nlohmann::json& j, ToolCallContent& v);
-/// @brief Serializes a SessionUpdatePayload (tagged by `sessionUpdate`).
-inline void to_json(nlohmann::json& j, const SessionUpdatePayload& v);
-/// @brief Deserializes a SessionUpdatePayload (tagged by `sessionUpdate`).
-inline void from_json(const nlohmann::json& j, SessionUpdatePayload& v);
-/// @brief Serializes a PermissionOutcome (tagged by `outcome`).
-inline void to_json(nlohmann::json& j, const PermissionOutcome& v);
-/// @brief Deserializes a PermissionOutcome (tagged by `outcome`).
-inline void from_json(const nlohmann::json& j, PermissionOutcome& v);
-/// @brief Serializes a McpServer (untagged stdio by default).
-inline void to_json(nlohmann::json& j, const McpServer& v);
-/// @brief Deserializes a McpServer (missing `type` selects stdio).
-inline void from_json(const nlohmann::json& j, McpServer& v);
-/// @brief Serializes an AuthMethod (untagged agent method by default).
-inline void to_json(nlohmann::json& j, const AuthMethod& v);
-/// @brief Deserializes an AuthMethod (missing `type` selects the agent method).
-inline void from_json(const nlohmann::json& j, AuthMethod& v);
+        /// @brief Deserializes a ContentBlock (tagged by `type`).
+        inline void from_json(const nlohmann::json &j, ContentBlock &v);
 
-/// @brief Serializes an unrecognized union alternative back to its raw JSON (`{}` when empty).
-inline void to_json(nlohmann::json& j, const Unknown& v) {
-    j = v.raw.json.empty() ? nlohmann::json::object() : nlohmann::json::parse(v.raw.json);
-}
-/// @brief Captures any JSON object as an Unknown alternative (tag left empty; set by the union reader).
-inline void from_json(const nlohmann::json& j, Unknown& v) { v.raw.json = j.dump(); }
+        /// @brief Serializes a ToolCallContent (tagged by `type`).
+        inline void to_json(nlohmann::json &j, const ToolCallContent &v);
 
-// --- Capabilities & Metadata ---
-BURAQ_NL_EMPTY(CapabilityMarker)
-BURAQ_NL_TYPE(FileSystemCapabilities, readTextFile, writeTextFile, _meta)
-BURAQ_NL_TYPE(SessionConfigOptionsCapabilities, boolean, _meta)
-BURAQ_NL_TYPE(ClientSessionCapabilities, compaction, configOptions, notices, _meta)
-BURAQ_NL_TYPE(ClientAuthCapabilities, terminal, _meta)
-BURAQ_NL_TYPE(ElicitationCapabilities, form, url, _meta)
-BURAQ_NL_TYPE(ClientCapabilities, fs, terminal, session, auth, elicitation, _meta)
-BURAQ_NL_TYPE(PromptCapabilities, image, audio, embeddedContext, _meta)
-BURAQ_NL_TYPE(McpCapabilities, http, sse, _meta)
-BURAQ_NL_TYPE(SystemPromptModeCapabilities, override, _meta)
-BURAQ_NL_TYPE(SystemPromptCapabilities, mode, _meta)
+        /// @brief Deserializes a ToolCallContent (tagged by `type`).
+        inline void from_json(const nlohmann::json &j, ToolCallContent &v);
 
-// `delete` is a C++ keyword; the member is spelled `delete_`
-/// @brief Serializes SessionCapabilities, mapping member `delete_` to key `delete`.
-inline void to_json(nlohmann::json& j, const SessionCapabilities& v) {
-    j = nlohmann::json::object();
-    ::buraq::detail::nl::put(j, "list", v.list);
-    ::buraq::detail::nl::put(j, "delete", v.delete_);
-    ::buraq::detail::nl::put(j, "additionalDirectories", v.additionalDirectories);
-    ::buraq::detail::nl::put(j, "systemPrompt", v.systemPrompt);
-    ::buraq::detail::nl::put(j, "resume", v.resume);
-    ::buraq::detail::nl::put(j, "close", v.close);
-    ::buraq::detail::nl::put(j, "_meta", v._meta);
-}
-/// @brief Deserializes SessionCapabilities, mapping key `delete` to member `delete_`.
-inline void from_json(const nlohmann::json& j, SessionCapabilities& v) {
-    ::buraq::detail::nl::expect_object(j, "SessionCapabilities");
-    ::buraq::detail::nl::get(j, "list", v.list);
-    ::buraq::detail::nl::get(j, "delete", v.delete_);
-    ::buraq::detail::nl::get(j, "additionalDirectories", v.additionalDirectories);
-    ::buraq::detail::nl::get(j, "systemPrompt", v.systemPrompt);
-    ::buraq::detail::nl::get(j, "resume", v.resume);
-    ::buraq::detail::nl::get(j, "close", v.close);
-    ::buraq::detail::nl::get(j, "_meta", v._meta);
-}
+        /// @brief Serializes a SessionUpdatePayload (tagged by `sessionUpdate`).
+        inline void to_json(nlohmann::json &j, const SessionUpdatePayload &v);
 
-BURAQ_NL_TYPE(AgentAuthCapabilities, logout, _meta)
-BURAQ_NL_TYPE(AgentCapabilities, loadSession, promptCapabilities, mcpCapabilities, sessionCapabilities, auth, _meta)
-BURAQ_NL_TYPE(ImplementationInfo, name, version, title, _meta)
+        /// @brief Deserializes a SessionUpdatePayload (tagged by `sessionUpdate`).
+        inline void from_json(const nlohmann::json &j, SessionUpdatePayload &v);
 
-// --- Authentication ---
-BURAQ_NL_TYPE(AuthMethodAgent, id, name, description, _meta)
-BURAQ_NL_TYPE(AuthMethodTerminal, type, id, name, description, args, env, _meta)
-BURAQ_NL_TAGGED(AuthMethod)
-BURAQ_NL_TYPE(AuthenticateParams, methodId, _meta)
-BURAQ_NL_EMPTY(AuthenticateResult)
-BURAQ_NL_EMPTY(LogoutParams)
-BURAQ_NL_EMPTY(LogoutResult)
+        /// @brief Serializes a PermissionOutcome (tagged by `outcome`).
+        inline void to_json(nlohmann::json &j, const PermissionOutcome &v);
 
-// --- initialize ---
-BURAQ_NL_TYPE(InitializeParams, protocolVersion, clientCapabilities, clientInfo, _meta)
-BURAQ_NL_TYPE(InitializeResult, protocolVersion, agentCapabilities, authMethods, agentInfo, _meta)
+        /// @brief Deserializes a PermissionOutcome (tagged by `outcome`).
+        inline void from_json(const nlohmann::json &j, PermissionOutcome &v);
 
-// --- Content Blocks ---
-BURAQ_NL_TYPE(Annotations, audience, lastModified, priority, _meta)
-BURAQ_NL_TYPE(TextContent, type, text, annotations, _meta)
-BURAQ_NL_TYPE(ImageContent, type, data, mimeType, uri, annotations, _meta)
-BURAQ_NL_TYPE(AudioContent, type, data, mimeType, annotations, _meta)
-BURAQ_NL_TYPE(ResourceLinkContent, type, uri, name, mimeType, description, title, size, annotations, _meta)
-BURAQ_NL_TYPE(EmbeddedResourcePayload, uri, mimeType, text, blob, _meta)
-BURAQ_NL_TYPE(EmbeddedResourceContent, type, resource, annotations, _meta)
-BURAQ_NL_TAGGED(ContentBlock)
+        /// @brief Serializes a McpServer (untagged stdio by default).
+        inline void to_json(nlohmann::json &j, const McpServer &v);
 
-// --- MCP servers ---
-BURAQ_NL_TYPE(EnvVariable, name, value, _meta)
-BURAQ_NL_TYPE(HttpHeader, name, value, _meta)
-BURAQ_NL_TYPE(McpServerHttp, type, name, url, headers, _meta)
-BURAQ_NL_TYPE(McpServerSse, type, name, url, headers, _meta)
-BURAQ_NL_TYPE(McpServerStdio, name, command, args, env, _meta)
-BURAQ_NL_TAGGED(McpServer)
+        /// @brief Deserializes a McpServer (missing `type` selects stdio).
+        inline void from_json(const nlohmann::json &j, McpServer &v);
 
-// --- Session configuration ---
-BURAQ_NL_TYPE(SessionMode, id, name, description, _meta)
-BURAQ_NL_TYPE(SessionModeState, currentModeId, availableModes, _meta)
-BURAQ_NL_TYPE(ModelInfo, modelId, name, description, _meta)
-BURAQ_NL_TYPE(SessionModelState, currentModelId, availableModels, _meta)
-BURAQ_NL_TYPE(SessionConfigSelectOption, value, name, description, _meta)
-BURAQ_NL_TYPE(SessionConfigSelectItem, value, name, description, group, options, _meta)
-BURAQ_NL_TYPE(SessionConfigOption, id, name, description, category, type, currentValue, options, _meta)
-BURAQ_NL_TYPE(SystemPrompt, mode, content, _meta)
+        /// @brief Serializes an AuthMethod (untagged agent method by default).
+        inline void to_json(nlohmann::json &j, const AuthMethod &v);
 
-// --- Sessions ---
-BURAQ_NL_TYPE(SessionNewParams, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
-BURAQ_NL_TYPE(SessionNewResult, sessionId, modes, configOptions, models, _meta)
-BURAQ_NL_TYPE(SessionLoadParams, sessionId, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
-BURAQ_NL_TYPE(SessionLoadResult, modes, configOptions, models, _meta)
-BURAQ_NL_TYPE(SessionResumeParams, sessionId, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
-BURAQ_NL_TYPE(SessionResumeResult, modes, configOptions, models, _meta)
-BURAQ_NL_TYPE(SessionListParams, cwd, cursor, _meta)
-BURAQ_NL_TYPE(SessionInfo, sessionId, cwd, additionalDirectories, title, updatedAt, _meta)
-BURAQ_NL_TYPE(SessionListResult, sessions, nextCursor, _meta)
-BURAQ_NL_TYPE(SessionDeleteParams, sessionId, _meta)
-BURAQ_NL_EMPTY(SessionDeleteResult)
-BURAQ_NL_TYPE(SessionCloseParams, sessionId, _meta)
-BURAQ_NL_EMPTY(SessionCloseResult)
-BURAQ_NL_TYPE(SessionSetModeParams, sessionId, modeId, _meta)
-BURAQ_NL_EMPTY(SessionSetModeResult)
-BURAQ_NL_TYPE(SessionSetConfigOptionParams, sessionId, configId, type, value, _meta)
-BURAQ_NL_TYPE(SessionSetConfigOptionResult, configOptions, _meta)
-BURAQ_NL_TYPE(SessionSetModelParams, sessionId, modelId, _meta)
-BURAQ_NL_EMPTY(SessionSetModelResult)
-BURAQ_NL_TYPE(SessionPromptParams, sessionId, prompt, _meta)
-BURAQ_NL_TYPE(SessionPromptResult, stopReason, _meta)
-BURAQ_NL_TYPE(SessionCancelParams, sessionId, _meta)
-BURAQ_NL_TYPE(CancelRequestParams, requestId, _meta)
+        /// @brief Deserializes an AuthMethod (missing `type` selects the agent method).
+        inline void from_json(const nlohmann::json &j, AuthMethod &v);
 
-// --- session/update ---
-BURAQ_NL_TYPE(UserMessageChunk, sessionUpdate, content, messageId, _meta)
-BURAQ_NL_TYPE(AgentMessageChunk, sessionUpdate, content, messageId, _meta)
-BURAQ_NL_TYPE(AgentThoughtChunk, sessionUpdate, content, messageId, _meta)
-BURAQ_NL_TYPE(ToolCallLocation, path, line, _meta)
-BURAQ_NL_TYPE(ToolCallContentItem, type, content, _meta)
-BURAQ_NL_TYPE(ToolCallDiffItem, type, path, oldText, newText, _meta)
-BURAQ_NL_TYPE(ToolCallTerminalItem, type, terminalId, _meta)
-BURAQ_NL_TAGGED(ToolCallContent)
-BURAQ_NL_TYPE(ToolCallUpdate, sessionUpdate, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput, _meta)
-BURAQ_NL_TYPE(ToolCallStatusUpdate, sessionUpdate, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput, _meta)
-BURAQ_NL_TYPE(PlanEntry, content, priority, status, _meta)
-BURAQ_NL_TYPE(PlanUpdate, sessionUpdate, entries, _meta)
-BURAQ_NL_TYPE(AvailableCommandInput, hint, _meta)
-BURAQ_NL_TYPE(AvailableCommand, name, description, input, _meta)
-BURAQ_NL_TYPE(AvailableCommandsUpdate, sessionUpdate, availableCommands, _meta)
-BURAQ_NL_TYPE(CurrentModeUpdate, sessionUpdate, currentModeId, _meta)
-BURAQ_NL_TYPE(ConfigOptionUpdate, sessionUpdate, configOptions, _meta)
-BURAQ_NL_TYPE(SessionInfoUpdate, sessionUpdate, title, updatedAt, _meta)
-BURAQ_NL_TYPE(Cost, amount, currency, _meta)
-BURAQ_NL_TYPE(UsageUpdate, sessionUpdate, used, size, cost, _meta)
-BURAQ_NL_TYPE(NoticeUpdate, sessionUpdate, severity, title, description, _meta)
-BURAQ_NL_TYPE(CompactionUpdate, sessionUpdate, compactionId, status, summary, error, _meta)
-BURAQ_NL_TYPE(CompactionSummaryChunk, sessionUpdate, compactionId, content, _meta)
-BURAQ_NL_TAGGED(SessionUpdatePayload)
-BURAQ_NL_TYPE(SessionUpdateNotification, sessionId, update, _meta)
+        /// @brief Serializes an unrecognized union alternative back to its raw JSON (`{}` when empty).
+        inline void to_json(nlohmann::json &j, const Unknown &v) {
+            j = v.raw.json.empty() ? nlohmann::json::object() : nlohmann::json::parse(v.raw.json);
+        }
 
-// --- Permissions ---
-BURAQ_NL_TYPE(PermissionOption, optionId, name, kind, _meta)
-BURAQ_NL_TYPE(PermissionToolCallInfo, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput, _meta)
-BURAQ_NL_TYPE(RequestPermissionParams, sessionId, toolCall, options, _meta)
-BURAQ_NL_TYPE(PermissionCancelledOutcome, outcome, _meta)
-BURAQ_NL_TYPE(PermissionSelectedOutcome, outcome, optionId, _meta)
-BURAQ_NL_TAGGED(PermissionOutcome)
-BURAQ_NL_TYPE(RequestPermissionResult, outcome, _meta)
+        /// @brief Captures any JSON object as an Unknown alternative (tag left empty; set by the union reader).
+        inline void from_json(const nlohmann::json &j, Unknown &v) { v.raw.json = j.dump(); }
 
-// --- Elicitation ---
-BURAQ_NL_TYPE(CreateElicitationParams, mode, message, requestedSchema, elicitationId, url, sessionId, toolCallId, requestId, _meta)
-BURAQ_NL_TYPE(CreateElicitationResult, action, content, _meta)
-BURAQ_NL_TYPE(CompleteElicitationParams, elicitationId, _meta)
+        // --- Capabilities & Metadata ---
+        BURAQ_NL_EMPTY(CapabilityMarker)
+        BURAQ_NL_TYPE(FileSystemCapabilities, readTextFile, writeTextFile, _meta)
+        BURAQ_NL_TYPE(SessionConfigOptionsCapabilities, boolean, _meta)
+        BURAQ_NL_TYPE(ClientSessionCapabilities, compaction, configOptions, notices, _meta)
+        BURAQ_NL_TYPE(ClientAuthCapabilities, terminal, _meta)
+        BURAQ_NL_TYPE(ElicitationCapabilities, form, url, _meta)
+        BURAQ_NL_TYPE(ClientCapabilities, fs, terminal, session, auth, elicitation, _meta)
+        BURAQ_NL_TYPE(PromptCapabilities, image, audio, embeddedContext, _meta)
+        BURAQ_NL_TYPE(McpCapabilities, http, sse, _meta)
+        BURAQ_NL_TYPE(SystemPromptModeCapabilities, override, _meta)
+        BURAQ_NL_TYPE(SystemPromptCapabilities, mode, _meta)
 
-// --- Filesystem ---
-BURAQ_NL_TYPE(FsReadTextFileParams, sessionId, path, line, limit, _meta)
-BURAQ_NL_TYPE(FsReadTextFileResult, content, _meta)
-BURAQ_NL_TYPE(FsWriteTextFileParams, sessionId, path, content, _meta)
-BURAQ_NL_EMPTY(FsWriteTextFileResult)
+        // `delete` is a C++ keyword; the member is spelled `delete_`
+        /// @brief Serializes SessionCapabilities, mapping member `delete_` to key `delete`.
+        inline void to_json(nlohmann::json &j, const SessionCapabilities &v) {
+            j = nlohmann::json::object();
+            ::buraq::detail::nl::put(j, "list", v.list);
+            ::buraq::detail::nl::put(j, "delete", v.delete_);
+            ::buraq::detail::nl::put(j, "additionalDirectories", v.additionalDirectories);
+            ::buraq::detail::nl::put(j, "systemPrompt", v.systemPrompt);
+            ::buraq::detail::nl::put(j, "resume", v.resume);
+            ::buraq::detail::nl::put(j, "close", v.close);
+            ::buraq::detail::nl::put(j, "_meta", v._meta);
+        }
 
-// --- Terminal ---
-BURAQ_NL_TYPE(TerminalCreateParams, sessionId, command, args, cwd, env, outputByteLimit, _meta)
-BURAQ_NL_TYPE(TerminalCreateResult, terminalId, _meta)
-BURAQ_NL_TYPE(TerminalOutputParams, sessionId, terminalId, _meta)
-BURAQ_NL_TYPE(TerminalExitStatus, exitCode, signal, _meta)
-BURAQ_NL_TYPE(TerminalOutputResult, output, truncated, exitStatus, _meta)
-BURAQ_NL_TYPE(TerminalWaitForExitParams, sessionId, terminalId, _meta)
-BURAQ_NL_TYPE(TerminalWaitForExitResult, exitCode, signal, _meta)
-BURAQ_NL_TYPE(TerminalKillParams, sessionId, terminalId, _meta)
-BURAQ_NL_EMPTY(TerminalKillResult)
-BURAQ_NL_TYPE(TerminalReleaseParams, sessionId, terminalId, _meta)
-BURAQ_NL_EMPTY(TerminalReleaseResult)
+        /// @brief Deserializes SessionCapabilities, mapping key `delete` to member `delete_`.
+        inline void from_json(const nlohmann::json &j, SessionCapabilities &v) {
+            ::buraq::detail::nl::expect_object(j, "SessionCapabilities");
+            ::buraq::detail::nl::get(j, "list", v.list);
+            ::buraq::detail::nl::get(j, "delete", v.delete_);
+            ::buraq::detail::nl::get(j, "additionalDirectories", v.additionalDirectories);
+            ::buraq::detail::nl::get(j, "systemPrompt", v.systemPrompt);
+            ::buraq::detail::nl::get(j, "resume", v.resume);
+            ::buraq::detail::nl::get(j, "close", v.close);
+            ::buraq::detail::nl::get(j, "_meta", v._meta);
+        }
 
-} // namespace v1
+        BURAQ_NL_TYPE(AgentAuthCapabilities, logout, _meta)
+        BURAQ_NL_TYPE(AgentCapabilities, loadSession, promptCapabilities, mcpCapabilities, sessionCapabilities, auth,
+                      _meta)
+        BURAQ_NL_TYPE(ImplementationInfo, name, version, title, _meta)
+
+        // --- Authentication ---
+        BURAQ_NL_TYPE(AuthMethodAgent, id, name, description, _meta)
+        BURAQ_NL_TYPE(AuthMethodTerminal, type, id, name, description, args, env, _meta)
+        BURAQ_NL_TAGGED(AuthMethod)
+        BURAQ_NL_TYPE(AuthenticateParams, methodId, _meta)
+        BURAQ_NL_EMPTY(AuthenticateResult)
+        BURAQ_NL_EMPTY(LogoutParams)
+        BURAQ_NL_EMPTY(LogoutResult)
+
+        // --- initialize ---
+        BURAQ_NL_TYPE(InitializeParams, protocolVersion, clientCapabilities, clientInfo, _meta)
+        BURAQ_NL_TYPE(InitializeResult, protocolVersion, agentCapabilities, authMethods, agentInfo, _meta)
+
+        // --- Content Blocks ---
+        BURAQ_NL_TYPE(Annotations, audience, lastModified, priority, _meta)
+        BURAQ_NL_TYPE(TextContent, type, text, annotations, _meta)
+        BURAQ_NL_TYPE(ImageContent, type, data, mimeType, uri, annotations, _meta)
+        BURAQ_NL_TYPE(AudioContent, type, data, mimeType, annotations, _meta)
+        BURAQ_NL_TYPE(ResourceLinkContent, type, uri, name, mimeType, description, title, size, annotations, _meta)
+        BURAQ_NL_TYPE(EmbeddedResourcePayload, uri, mimeType, text, blob, _meta)
+        BURAQ_NL_TYPE(EmbeddedResourceContent, type, resource, annotations, _meta)
+        BURAQ_NL_TAGGED(ContentBlock)
+
+        // --- MCP servers ---
+        BURAQ_NL_TYPE(EnvVariable, name, value, _meta)
+        BURAQ_NL_TYPE(HttpHeader, name, value, _meta)
+        BURAQ_NL_TYPE(McpServerHttp, type, name, url, headers, _meta)
+        BURAQ_NL_TYPE(McpServerSse, type, name, url, headers, _meta)
+        BURAQ_NL_TYPE(McpServerStdio, name, command, args, env, _meta)
+        BURAQ_NL_TAGGED(McpServer)
+
+        // --- Session configuration ---
+        BURAQ_NL_TYPE(SessionMode, id, name, description, _meta)
+        BURAQ_NL_TYPE(SessionModeState, currentModeId, availableModes, _meta)
+        BURAQ_NL_TYPE(ModelInfo, modelId, name, description, _meta)
+        BURAQ_NL_TYPE(SessionModelState, currentModelId, availableModels, _meta)
+        BURAQ_NL_TYPE(SessionConfigSelectOption, value, name, description, _meta)
+        BURAQ_NL_TYPE(SessionConfigSelectItem, value, name, description, group, options, _meta)
+        BURAQ_NL_TYPE(SessionConfigOption, id, name, description, category, type, currentValue, options, _meta)
+        BURAQ_NL_TYPE(SystemPrompt, mode, content, _meta)
+
+        // --- Sessions ---
+        BURAQ_NL_TYPE(SessionNewParams, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
+        BURAQ_NL_TYPE(SessionNewResult, sessionId, modes, configOptions, models, _meta)
+        BURAQ_NL_TYPE(SessionLoadParams, sessionId, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
+        BURAQ_NL_TYPE(SessionLoadResult, modes, configOptions, models, _meta)
+        BURAQ_NL_TYPE(SessionResumeParams, sessionId, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
+        BURAQ_NL_TYPE(SessionResumeResult, modes, configOptions, models, _meta)
+        BURAQ_NL_TYPE(SessionListParams, cwd, cursor, _meta)
+        BURAQ_NL_TYPE(SessionInfo, sessionId, cwd, additionalDirectories, title, updatedAt, _meta)
+        BURAQ_NL_TYPE(SessionListResult, sessions, nextCursor, _meta)
+        BURAQ_NL_TYPE(SessionDeleteParams, sessionId, _meta)
+        BURAQ_NL_EMPTY(SessionDeleteResult)
+        BURAQ_NL_TYPE(SessionCloseParams, sessionId, _meta)
+        BURAQ_NL_EMPTY(SessionCloseResult)
+        BURAQ_NL_TYPE(SessionSetModeParams, sessionId, modeId, _meta)
+        BURAQ_NL_EMPTY(SessionSetModeResult)
+        BURAQ_NL_TYPE(SessionSetConfigOptionParams, sessionId, configId, type, value, _meta)
+        BURAQ_NL_TYPE(SessionSetConfigOptionResult, configOptions, _meta)
+        BURAQ_NL_TYPE(SessionSetModelParams, sessionId, modelId, _meta)
+        BURAQ_NL_EMPTY(SessionSetModelResult)
+        BURAQ_NL_TYPE(SessionPromptParams, sessionId, prompt, _meta)
+        BURAQ_NL_TYPE(SessionPromptResult, stopReason, _meta)
+        BURAQ_NL_TYPE(SessionCancelParams, sessionId, _meta)
+        BURAQ_NL_TYPE(CancelRequestParams, requestId, _meta)
+
+        // --- session/update ---
+        BURAQ_NL_TYPE(UserMessageChunk, sessionUpdate, content, messageId, _meta)
+        BURAQ_NL_TYPE(AgentMessageChunk, sessionUpdate, content, messageId, _meta)
+        BURAQ_NL_TYPE(AgentThoughtChunk, sessionUpdate, content, messageId, _meta)
+        BURAQ_NL_TYPE(ToolCallLocation, path, line, _meta)
+        BURAQ_NL_TYPE(ToolCallContentItem, type, content, _meta)
+        BURAQ_NL_TYPE(ToolCallDiffItem, type, path, oldText, newText, _meta)
+        BURAQ_NL_TYPE(ToolCallTerminalItem, type, terminalId, _meta)
+        BURAQ_NL_TAGGED(ToolCallContent)
+        BURAQ_NL_TYPE(ToolCallUpdate, sessionUpdate, toolCallId, title, name, kind, status, content, locations,
+                      rawInput, rawOutput, _meta)
+        BURAQ_NL_TYPE(ToolCallStatusUpdate, sessionUpdate, toolCallId, title, name, kind, status, content, locations,
+                      rawInput, rawOutput, _meta)
+        BURAQ_NL_TYPE(PlanEntry, content, priority, status, _meta)
+        BURAQ_NL_TYPE(PlanUpdate, sessionUpdate, entries, _meta)
+        BURAQ_NL_TYPE(AvailableCommandInput, hint, _meta)
+        BURAQ_NL_TYPE(AvailableCommand, name, description, input, _meta)
+        BURAQ_NL_TYPE(AvailableCommandsUpdate, sessionUpdate, availableCommands, _meta)
+        BURAQ_NL_TYPE(CurrentModeUpdate, sessionUpdate, currentModeId, _meta)
+        BURAQ_NL_TYPE(ConfigOptionUpdate, sessionUpdate, configOptions, _meta)
+        BURAQ_NL_TYPE(SessionInfoUpdate, sessionUpdate, title, updatedAt, _meta)
+        BURAQ_NL_TYPE(Cost, amount, currency, _meta)
+        BURAQ_NL_TYPE(UsageUpdate, sessionUpdate, used, size, cost, _meta)
+        BURAQ_NL_TYPE(NoticeUpdate, sessionUpdate, severity, title, description, _meta)
+        BURAQ_NL_TYPE(CompactionUpdate, sessionUpdate, compactionId, status, summary, error, _meta)
+        BURAQ_NL_TYPE(CompactionSummaryChunk, sessionUpdate, compactionId, content, _meta)
+        BURAQ_NL_TAGGED(SessionUpdatePayload)
+        BURAQ_NL_TYPE(SessionUpdateNotification, sessionId, update, _meta)
+
+        // --- Permissions ---
+        BURAQ_NL_TYPE(PermissionOption, optionId, name, kind, _meta)
+        BURAQ_NL_TYPE(PermissionToolCallInfo, toolCallId, title, name, kind, status, content, locations, rawInput,
+                      rawOutput, _meta)
+        BURAQ_NL_TYPE(RequestPermissionParams, sessionId, toolCall, options, _meta)
+        BURAQ_NL_TYPE(PermissionCancelledOutcome, outcome, _meta)
+        BURAQ_NL_TYPE(PermissionSelectedOutcome, outcome, optionId, _meta)
+        BURAQ_NL_TAGGED(PermissionOutcome)
+        BURAQ_NL_TYPE(RequestPermissionResult, outcome, _meta)
+
+        // --- Elicitation ---
+        BURAQ_NL_TYPE(CreateElicitationParams, mode, message, requestedSchema, elicitationId, url, sessionId,
+                      toolCallId, requestId, _meta)
+        BURAQ_NL_TYPE(CreateElicitationResult, action, content, _meta)
+        BURAQ_NL_TYPE(CompleteElicitationParams, elicitationId, _meta)
+
+        // --- Filesystem ---
+        BURAQ_NL_TYPE(FsReadTextFileParams, sessionId, path, line, limit, _meta)
+        BURAQ_NL_TYPE(FsReadTextFileResult, content, _meta)
+        BURAQ_NL_TYPE(FsWriteTextFileParams, sessionId, path, content, _meta)
+        BURAQ_NL_EMPTY(FsWriteTextFileResult)
+
+        // --- Terminal ---
+        BURAQ_NL_TYPE(TerminalCreateParams, sessionId, command, args, cwd, env, outputByteLimit, _meta)
+        BURAQ_NL_TYPE(TerminalCreateResult, terminalId, _meta)
+        BURAQ_NL_TYPE(TerminalOutputParams, sessionId, terminalId, _meta)
+        BURAQ_NL_TYPE(TerminalExitStatus, exitCode, signal, _meta)
+        BURAQ_NL_TYPE(TerminalOutputResult, output, truncated, exitStatus, _meta)
+        BURAQ_NL_TYPE(TerminalWaitForExitParams, sessionId, terminalId, _meta)
+        BURAQ_NL_TYPE(TerminalWaitForExitResult, exitCode, signal, _meta)
+        BURAQ_NL_TYPE(TerminalKillParams, sessionId, terminalId, _meta)
+        BURAQ_NL_EMPTY(TerminalKillResult)
+        BURAQ_NL_TYPE(TerminalReleaseParams, sessionId, terminalId, _meta)
+        BURAQ_NL_EMPTY(TerminalReleaseResult)
+    } // namespace v1
 
 #undef BURAQ_NL_EXPAND
 #undef BURAQ_NL_FE_1
@@ -535,170 +556,169 @@ BURAQ_NL_EMPTY(TerminalReleaseResult)
 #undef BURAQ_NL_EMPTY
 #undef BURAQ_NL_TAGGED
 
-/// @brief buraq::JsonCodec implementation backed by nlohmann/json.
-///
-/// Stateless; all members are static. Unknown keys are ignored on read and empty optionals are omitted on write.
-struct NlohmannCodec {
-    /// @brief Parses the top-level JSON-RPC 2.0 envelope of one frame without decoding the payload.
+    /// @brief buraq::JsonCodec implementation backed by nlohmann/json.
     ///
-    /// `method`, `params` and `result` are copied into thread-local buffers, so the returned views stay valid
-    /// only until the next call on the same thread.
-    /// @param frame One NDJSON frame (without the trailing newline).
-    /// @return The envelope; RpcError::parse_error() when the frame is not a JSON object, or
-    /// RpcError::invalid_request() when `jsonrpc` is not "2.0" or `id` is neither integer nor string.
-    static expected<RawEnvelope, RpcError> parse_envelope(std::span<const std::byte> frame) {
-        thread_local std::string method_buf;
-        thread_local std::string params_buf;
-        thread_local std::string result_buf;
+    /// Stateless; all members are static. Unknown keys are ignored on read and empty optionals are omitted on write.
+    struct NlohmannCodec {
+        /// @brief Parses the top-level JSON-RPC 2.0 envelope of one frame without decoding the payload.
+        ///
+        /// `method`, `params` and `result` are copied into thread-local buffers, so the returned views stay valid
+        /// only until the next call on the same thread.
+        /// @param frame One NDJSON frame (without the trailing newline).
+        /// @return The envelope; RpcError::parse_error() when the frame is not a JSON object, or
+        /// RpcError::invalid_request() when `jsonrpc` is not "2.0" or `id` is neither integer nor string.
+        static expected<RawEnvelope, RpcError> parse_envelope(std::span<const std::byte> frame) {
+            thread_local std::string method_buf;
+            thread_local std::string params_buf;
+            thread_local std::string result_buf;
 
-        method_buf.clear();
-        params_buf.clear();
-        result_buf.clear();
+            method_buf.clear();
+            params_buf.clear();
+            result_buf.clear();
 
-        std::string_view sv{reinterpret_cast<const char*>(frame.data()), frame.size()};
-        nlohmann::json j = nlohmann::json::parse(sv, nullptr, false);
-        if (j.is_discarded() || !j.is_object()) {
-            return unexpected(RpcError::parse_error("Malformed JSON-RPC object"));
+            std::string_view sv{reinterpret_cast<const char *>(frame.data()), frame.size()};
+            nlohmann::json j = nlohmann::json::parse(sv, nullptr, false);
+            if (j.is_discarded() || !j.is_object()) {
+                return unexpected(RpcError::parse_error("Malformed JSON-RPC object"));
+            }
+
+            if (j.value("jsonrpc", "") != "2.0") {
+                return unexpected(RpcError::invalid_request("Missing or invalid jsonrpc: \"2.0\""));
+            }
+
+            RawEnvelope env{};
+
+            if (auto it = j.find("id"); it != j.end() && !it->is_null()) {
+                if (it->is_number_integer()) {
+                    env.id = it->get<std::int64_t>();
+                } else if (it->is_string()) {
+                    env.id = it->get<std::string>();
+                } else {
+                    return unexpected(RpcError::invalid_request("Invalid JSON-RPC id type"));
+                }
+            }
+
+            if (auto it = j.find("method"); it != j.end() && it->is_string()) {
+                method_buf = it->get<std::string>();
+                env.method = method_buf;
+            }
+
+            if (auto it = j.find("params"); it != j.end() && !it->is_null()) {
+                params_buf = it->dump();
+                env.params_json = params_buf;
+            }
+
+            if (auto it = j.find("result"); it != j.end()) {
+                result_buf = it->dump();
+                env.result_json = result_buf;
+            }
+
+            if (auto it = j.find("error"); it != j.end() && it->is_object()) {
+                RpcError err{
+                    .code = it->value("code", -32603),
+                    .message = it->value("message", "Unknown RPC error"),
+                };
+                if (auto dit = it->find("data"); dit != it->end() && !dit->is_null()) {
+                    err.data_json = dit->dump();
+                }
+                env.error = std::move(err);
+            }
+
+            return env;
         }
 
-        if (j.value("jsonrpc", "") != "2.0") {
-            return unexpected(RpcError::invalid_request("Missing or invalid jsonrpc: \"2.0\""));
-        }
+        /// @brief Decodes a typed params/result payload.
+        /// @tparam T Target type.
+        /// @param json Raw JSON text; empty text yields `T{}` when T is default-constructible.
+        /// @return The decoded value, or RpcError::invalid_params() on empty input (non-default-constructible T) or
+        /// any parse/conversion exception (its `what()` becomes the message).
+        template<typename T>
+        static expected<T, RpcError> decode(std::string_view json) {
+            if (json.empty()) {
+                if constexpr (std::is_default_constructible_v<T>) {
+                    return T{};
+                }
+                return unexpected(RpcError::invalid_params("Empty JSON payload"));
+            }
 
-        RawEnvelope env{};
-
-        if (auto it = j.find("id"); it != j.end() && !it->is_null()) {
-            if (it->is_number_integer()) {
-                env.id = it->get<std::int64_t>();
-            } else if (it->is_string()) {
-                env.id = it->get<std::string>();
-            } else {
-                return unexpected(RpcError::invalid_request("Invalid JSON-RPC id type"));
+            try {
+                auto parsed = nlohmann::json::parse(json);
+                return parsed.get<T>();
+            } catch (const std::exception &ex) {
+                return unexpected(RpcError::invalid_params(ex.what()));
             }
         }
 
-        if (auto it = j.find("method"); it != j.end() && it->is_string()) {
-            method_buf = it->get<std::string>();
-            env.method = method_buf;
-        }
-
-        if (auto it = j.find("params"); it != j.end() && !it->is_null()) {
-            params_buf = it->dump();
-            env.params_json = params_buf;
-        }
-
-        if (auto it = j.find("result"); it != j.end()) {
-            result_buf = it->dump();
-            env.result_json = result_buf;
-        }
-
-        if (auto it = j.find("error"); it != j.end() && it->is_object()) {
-            RpcError err{
-                .code = it->value("code", -32603),
-                .message = it->value("message", "Unknown RPC error"),
+        /// @brief Encodes a JSON-RPC request.
+        /// @tparam T Params type.
+        /// @param id Request id.
+        /// @param method Method name.
+        /// @param val Params.
+        /// @return Compact JSON text (no trailing newline).
+        template<typename T>
+        static std::string encode_request(const RequestId &id, std::string_view method, const T &val) {
+            nlohmann::json j{
+                {"jsonrpc", "2.0"},
+                {"id", detail::id_to_json(id)},
+                {"method", method},
+                {"params", val},
             };
-            if (auto dit = it->find("data"); dit != it->end() && !dit->is_null()) {
-                err.data_json = dit->dump();
+            return j.dump();
+        }
+
+        /// @brief Encodes a JSON-RPC notification.
+        /// @tparam T Params type.
+        /// @param method Method name.
+        /// @param val Params.
+        /// @return Compact JSON text (no trailing newline).
+        template<typename T>
+        static std::string encode_notification(std::string_view method, const T &val) {
+            nlohmann::json j{
+                {"jsonrpc", "2.0"},
+                {"method", method},
+                {"params", val},
+            };
+            return j.dump();
+        }
+
+        /// @brief Encodes a JSON-RPC success response.
+        /// @tparam T Result type.
+        /// @param id Id of the request being answered.
+        /// @param val Result.
+        /// @return Compact JSON text (no trailing newline).
+        template<typename T>
+        static std::string encode_result(const RequestId &id, const T &val) {
+            nlohmann::json j{
+                {"jsonrpc", "2.0"},
+                {"id", detail::id_to_json(id)},
+                {"result", val},
+            };
+            return j.dump();
+        }
+
+        /// @brief Encodes a JSON-RPC error response.
+        /// @param id Id of the request being answered.
+        /// @param err Error; a non-empty RpcError::data_json is embedded as JSON `data` (as a string if it is not valid JSON).
+        /// @return Compact JSON text (no trailing newline).
+        static std::string encode_error(const RequestId &id, const RpcError &err) {
+            nlohmann::json err_obj{
+                {"code", err.code},
+                {"message", err.message},
+            };
+            if (err.data_json && !err.data_json->empty()) {
+                auto parsed_data = nlohmann::json::parse(*err.data_json, nullptr, false);
+                err_obj["data"] = parsed_data.is_discarded() ? nlohmann::json(*err.data_json) : parsed_data;
             }
-            env.error = std::move(err);
+
+            nlohmann::json j{
+                {"jsonrpc", "2.0"},
+                {"id", detail::id_to_json(id)},
+                {"error", std::move(err_obj)},
+            };
+            return j.dump();
         }
+    };
 
-        return env;
-    }
-
-    /// @brief Decodes a typed params/result payload.
-    /// @tparam T Target type.
-    /// @param json Raw JSON text; empty text yields `T{}` when T is default-constructible.
-    /// @return The decoded value, or RpcError::invalid_params() on empty input (non-default-constructible T) or
-    /// any parse/conversion exception (its `what()` becomes the message).
-    template <typename T>
-    static expected<T, RpcError> decode(std::string_view json) {
-        if (json.empty()) {
-            if constexpr (std::is_default_constructible_v<T>) {
-                return T{};
-            }
-            return unexpected(RpcError::invalid_params("Empty JSON payload"));
-        }
-
-        try {
-            auto parsed = nlohmann::json::parse(json);
-            return parsed.get<T>();
-        } catch (const std::exception& ex) {
-            return unexpected(RpcError::invalid_params(ex.what()));
-        }
-    }
-
-    /// @brief Encodes a JSON-RPC request.
-    /// @tparam T Params type.
-    /// @param id Request id.
-    /// @param method Method name.
-    /// @param val Params.
-    /// @return Compact JSON text (no trailing newline).
-    template <typename T>
-    static std::string encode_request(const RequestId& id, std::string_view method, const T& val) {
-        nlohmann::json j{
-            {"jsonrpc", "2.0"},
-            {"id", detail::id_to_json(id)},
-            {"method", method},
-            {"params", val},
-        };
-        return j.dump();
-    }
-
-    /// @brief Encodes a JSON-RPC notification.
-    /// @tparam T Params type.
-    /// @param method Method name.
-    /// @param val Params.
-    /// @return Compact JSON text (no trailing newline).
-    template <typename T>
-    static std::string encode_notification(std::string_view method, const T& val) {
-        nlohmann::json j{
-            {"jsonrpc", "2.0"},
-            {"method", method},
-            {"params", val},
-        };
-        return j.dump();
-    }
-
-    /// @brief Encodes a JSON-RPC success response.
-    /// @tparam T Result type.
-    /// @param id Id of the request being answered.
-    /// @param val Result.
-    /// @return Compact JSON text (no trailing newline).
-    template <typename T>
-    static std::string encode_result(const RequestId& id, const T& val) {
-        nlohmann::json j{
-            {"jsonrpc", "2.0"},
-            {"id", detail::id_to_json(id)},
-            {"result", val},
-        };
-        return j.dump();
-    }
-
-    /// @brief Encodes a JSON-RPC error response.
-    /// @param id Id of the request being answered.
-    /// @param err Error; a non-empty RpcError::data_json is embedded as JSON `data` (as a string if it is not valid JSON).
-    /// @return Compact JSON text (no trailing newline).
-    static std::string encode_error(const RequestId& id, const RpcError& err) {
-        nlohmann::json err_obj{
-            {"code", err.code},
-            {"message", err.message},
-        };
-        if (err.data_json && !err.data_json->empty()) {
-            auto parsed_data = nlohmann::json::parse(*err.data_json, nullptr, false);
-            err_obj["data"] = parsed_data.is_discarded() ? nlohmann::json(*err.data_json) : parsed_data;
-        }
-
-        nlohmann::json j{
-            {"jsonrpc", "2.0"},
-            {"id", detail::id_to_json(id)},
-            {"error", std::move(err_obj)},
-        };
-        return j.dump();
-    }
-};
-
-static_assert(JsonCodec<NlohmannCodec>);
-
+    static_assert(JsonCodec<NlohmannCodec>);
 } // namespace buraq
 // ---- end buraq/codecs/nlohmann.hpp ----

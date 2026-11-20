@@ -11,16 +11,16 @@ option(BURAQ_INSTALL "Generate install and CMake package export rules" ${PROJECT
 option(BURAQ_ENABLE_COVERAGE "Instrument tests/examples and add the buraq_coverage target (GCC/Clang + gcovr)" OFF)
 option(BURAQ_BUILD_DOCS "Add the buraq_docs target (Doxygen API reference)" OFF)
 
-if(BURAQ_ENABLE_COVERAGE)
-    if(NOT BURAQ_BUILD_TESTS)
+if (BURAQ_ENABLE_COVERAGE)
+    if (NOT BURAQ_BUILD_TESTS)
         message(FATAL_ERROR "BURAQ_ENABLE_COVERAGE requires BURAQ_BUILD_TESTS=ON")
-    endif()
+    endif ()
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuraqCoverage.cmake")
-endif()
+endif ()
 
-if(BURAQ_BUILD_DOCS)
+if (BURAQ_BUILD_DOCS)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuraqDocs.cmake")
-endif()
+endif ()
 
 # --- Core Header-Only Library (Zero External Dependencies) ---
 add_library(buraq INTERFACE)
@@ -56,7 +56,7 @@ target_include_directories(buraq INTERFACE
 )
 
 # --- Install & find_package(buraq) Support ---
-if(BURAQ_INSTALL)
+if (BURAQ_INSTALL)
     install(TARGETS buraq
             EXPORT buraqTargets
             FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
@@ -86,12 +86,12 @@ if(BURAQ_INSTALL)
             "${CMAKE_CURRENT_BINARY_DIR}/buraqConfigVersion.cmake"
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/buraq
     )
-endif()
+endif ()
 
 # --- Optional Codec Dependencies (Only for Examples / Tests) ---
-if(BURAQ_BUILD_EXAMPLES OR BURAQ_BUILD_TESTS)
+if (BURAQ_BUILD_EXAMPLES OR BURAQ_BUILD_TESTS)
     find_package(glaze QUIET)
-    if(NOT glaze_FOUND AND BURAQ_FETCH_CODECS)
+    if (NOT glaze_FOUND AND BURAQ_FETCH_CODECS)
         include(FetchContent)
         FetchContent_Declare(
                 glaze
@@ -100,10 +100,10 @@ if(BURAQ_BUILD_EXAMPLES OR BURAQ_BUILD_TESTS)
                 GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(glaze)
-    endif()
+    endif ()
 
     find_package(nlohmann_json QUIET)
-    if(NOT nlohmann_json_FOUND AND BURAQ_FETCH_CODECS)
+    if (NOT nlohmann_json_FOUND AND BURAQ_FETCH_CODECS)
         include(FetchContent)
         FetchContent_Declare(
                 nlohmann_json
@@ -112,12 +112,12 @@ if(BURAQ_BUILD_EXAMPLES OR BURAQ_BUILD_TESTS)
                 GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(nlohmann_json)
-    endif()
-endif()
+    endif ()
+endif ()
 
 # --- Examples ---
-if(BURAQ_BUILD_EXAMPLES)
-    if(TARGET glaze::glaze)
+if (BURAQ_BUILD_EXAMPLES)
+    if (TARGET glaze::glaze)
         add_executable(buraq_echo_agent examples/echo_agent.cpp)
         target_link_libraries(buraq_echo_agent PRIVATE buraq::buraq glaze::glaze)
         target_compile_options(buraq_echo_agent PRIVATE
@@ -131,15 +131,15 @@ if(BURAQ_BUILD_EXAMPLES)
                 $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
                 $<$<CXX_COMPILER_ID:MSVC>:/W4>
         )
-    else()
+    else ()
         message(STATUS "Skipping examples: glaze::glaze not available")
-    endif()
-endif()
+    endif ()
+endif ()
 
 # --- Tests ---
-if(BURAQ_BUILD_TESTS)
+if (BURAQ_BUILD_TESTS)
     enable_testing()
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/dispatch_test.cpp")
+    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/dispatch_test.cpp")
         add_executable(buraq_dispatch_test tests/dispatch_test.cpp)
         target_link_libraries(buraq_dispatch_test PRIVATE
                 buraq::buraq
@@ -149,7 +149,7 @@ if(BURAQ_BUILD_TESTS)
         add_test(NAME dispatch_test COMMAND buraq_dispatch_test)
 
         # Same suite compiled against the amalgamated single-header distribution
-        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/single_include/buraq/acp.hpp"
+        if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/single_include/buraq/acp.hpp"
                 AND TARGET glaze::glaze AND TARGET nlohmann_json::nlohmann_json)
             add_executable(buraq_single_include_test tests/dispatch_test.cpp)
             target_compile_features(buraq_single_include_test PRIVATE cxx_std_20)
@@ -158,32 +158,32 @@ if(BURAQ_BUILD_TESTS)
             target_link_libraries(buraq_single_include_test PRIVATE
                     glaze::glaze nlohmann_json::nlohmann_json)
             add_test(NAME single_include_test COMMAND buraq_single_include_test)
-        endif()
-    endif()
+        endif ()
+    endif ()
 
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_test.cpp"
+    if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_test.cpp"
             AND TARGET glaze::glaze AND TARGET nlohmann_json::nlohmann_json)
         add_executable(buraq_runtime_test tests/runtime_test.cpp)
         target_link_libraries(buraq_runtime_test PRIVATE
                 buraq::buraq glaze::glaze nlohmann_json::nlohmann_json)
-        if(TARGET buraq_echo_agent)
+        if (TARGET buraq_echo_agent)
             add_test(NAME runtime_test COMMAND buraq_runtime_test $<TARGET_FILE:buraq_echo_agent>)
-        else()
+        else ()
             add_test(NAME runtime_test COMMAND buraq_runtime_test)
-        endif()
-    endif()
+        endif ()
+    endif ()
 
     # End-to-end: the minimal client spawns the echo agent over real stdio pipes.
-    if(TARGET buraq_minimal_client AND TARGET buraq_echo_agent)
+    if (TARGET buraq_minimal_client AND TARGET buraq_echo_agent)
         add_test(NAME stdio_e2e_test
                 COMMAND buraq_minimal_client $<TARGET_FILE:buraq_echo_agent>)
         set_tests_properties(stdio_e2e_test PROPERTIES PASS_REGULAR_EXPRESSION "Turn finished: end_turn")
-    endif()
-endif()
+    endif ()
+endif ()
 
-if(BURAQ_ENABLE_COVERAGE)
+if (BURAQ_ENABLE_COVERAGE)
     # single_include_test is not instrumented: it would only re-measure the amalgamated copy.
-    foreach(_buraq_cov_target buraq_dispatch_test buraq_runtime_test buraq_echo_agent buraq_minimal_client)
+    foreach (_buraq_cov_target buraq_dispatch_test buraq_runtime_test buraq_echo_agent buraq_minimal_client)
         buraq_enable_coverage(${_buraq_cov_target})
-    endforeach()
-endif()
+    endforeach ()
+endif ()

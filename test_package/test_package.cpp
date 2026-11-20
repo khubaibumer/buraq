@@ -14,24 +14,22 @@
 #include <variant>
 
 namespace {
+    // Unknown keys (`_meta`) must be ignored; an untagged MCP server must decode as the stdio alternative.
+    constexpr std::string_view kSessionNew =
+            R"({"cwd":"/workspace","mcpServers":[{"name":"fs","command":"mcp-fs","args":[],"env":[]}],"_meta":{"x":1}})";
 
-// Unknown keys (`_meta`) must be ignored; an untagged MCP server must decode as the stdio alternative.
-constexpr std::string_view kSessionNew =
-    R"({"cwd":"/workspace","mcpServers":[{"name":"fs","command":"mcp-fs","args":[],"env":[]}],"_meta":{"x":1}})";
-
-template <typename Codec>
-bool round_trip(const char* name) {
-    auto params = Codec::template decode<buraq::v1::SessionNewParams>(kSessionNew);
-    if (!params || params->mcpServers.size() != 1 ||
-        !std::holds_alternative<buraq::v1::McpServerStdio>(params->mcpServers.front())) {
-        std::printf("%s: decode failed\n", name);
-        return false;
+    template<typename Codec>
+    bool round_trip(const char *name) {
+        auto params = Codec::template decode<buraq::v1::SessionNewParams>(kSessionNew);
+        if (!params || params->mcpServers.size() != 1 ||
+            !std::holds_alternative<buraq::v1::McpServerStdio>(params->mcpServers.front())) {
+            std::printf("%s: decode failed\n", name);
+            return false;
+        }
+        const auto wire = Codec::encode_request(buraq::RequestId{std::int64_t{1}}, "session/new", *params);
+        std::printf("%s: %s\n", name, wire.c_str());
+        return wire.find("\"mcp-fs\"") != std::string::npos;
     }
-    const auto wire = Codec::encode_request(buraq::RequestId{std::int64_t{1}}, "session/new", *params);
-    std::printf("%s: %s\n", name, wire.c_str());
-    return wire.find("\"mcp-fs\"") != std::string::npos;
-}
-
 } // namespace
 
 int main() {

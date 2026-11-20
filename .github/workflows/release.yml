@@ -62,7 +62,7 @@ jobs:
 
   tag-and-publish:
     name: Tag ${{ needs.validate.outputs.tag }} & Publish Release
-    needs: [validate, verify]
+    needs: [ validate, verify ]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

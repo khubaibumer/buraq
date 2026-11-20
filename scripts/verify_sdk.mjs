@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { Readable, Writable } from "node:stream";
+import {spawn} from "node:child_process";
+import {Readable, Writable} from "node:stream";
 import assert from "node:assert/strict";
 import * as acp from "@agentclientprotocol/sdk";
 
@@ -9,7 +9,7 @@ const child = spawn(agentPath, [], {
     stdio: ["pipe", "pipe", "inherit"],
 });
 
-const app = acp.client({ name: "buraq-sdk-verifier" });
+const app = acp.client({name: "buraq-sdk-verifier"});
 
 const stream = acp.ndJsonStream(
     Writable.toWeb(child.stdin),
@@ -22,10 +22,10 @@ try {
         const initRes = await cx.request("initialize", {
             protocolVersion: acp.PROTOCOL_VERSION,
             clientCapabilities: {
-                fs: { readTextFile: true, writeTextFile: true },
+                fs: {readTextFile: true, writeTextFile: true},
                 terminal: true,
             },
-            clientInfo: { name: "acp-official-sdk-verifier", version: "1.0.0" },
+            clientInfo: {name: "acp-official-sdk-verifier", version: "1.0.0"},
         });
 
         console.log("[OK] initialize:", JSON.stringify(initRes));
@@ -34,7 +34,7 @@ try {
 
         // 2. Create session & stream prompt via SessionBuilder
         const session = await cx
-            .buildSession({ cwd: process.cwd(), mcpServers: [] })
+            .buildSession({cwd: process.cwd(), mcpServers: []})
             .start();
 
         console.log("[OK] session/new:", session.sessionId);
@@ -73,7 +73,7 @@ try {
         );
 
         // 4. Cancellation notification: session/cancel
-        await cx.notify("session/cancel", { sessionId: session.sessionId });
+        await cx.notify("session/cancel", {sessionId: session.sessionId});
         console.log("[OK] session/cancel sent cleanly");
     });
 

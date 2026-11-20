@@ -1,85 +1,112 @@
 # Changelog
 
 All notable changes to this project are documented in this file.
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
+to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
 ### Added
 
-- **`buraq::runtime`** (`buraq/runtime/connection.hpp`): a threaded connection that removes the boilerplate around the sans-I/O core.
-  - `serve_stdio(agent)` serves an agent over stdin/stdout.
-  - `spawn_agent(client, argv, SpawnOptions)` launches an agent process (POSIX and Windows) and returns a running connection.
-  - `Connection<Peer>` works over any `LineChannel`. It offers future-returning shorthands (`initialize`, `new_session`, `prompt`, `cancel`, `request_permission`, `read_text_file`, …), `request<Result>()` and `notify()`.
-  - Requests run off the reader thread, so hooks may block on replies. `Dispatch::serial` (the default) and `Dispatch::concurrent` select the dispatch mode.
-  - Notifications are processed in arrival order before the reply that follows them, so `session/cancel` can interrupt a running prompt.
-  - Outstanding requests fail with `-32603` when the peer disconnects.
-- **`buraq::transport::Process`** (`buraq/transport/process.hpp`): a portable subprocess with piped stdio, env/cwd options and graceful termination.
-- **Deferred replies:** request hooks may take a `buraq::Responder<Result>` and reply later from any thread. Dropping it unanswered sends `-32603`.
-- **Typed agent → client requests:** `request_permission`, `request_fs_*`, `request_terminal_*`, `request_elicitation`, `request_ext_method` and `send_request<Result>` take a callback or `buraq::use_future`. `ClientBase::send_*` now accept `buraq::use_future` as well.
-  - `pending_count()` and `cancel_all_pending()` are available on both bases.
+- **`buraq::runtime`** (`buraq/runtime/connection.hpp`): a threaded connection that removes the boilerplate around the
+  sans-I/O core.
+    - `serve_stdio(agent)` serves an agent over stdin/stdout.
+    - `spawn_agent(client, argv, SpawnOptions)` launches an agent process (POSIX and Windows) and returns a running
+      connection.
+    - `Connection<Peer>` works over any `LineChannel`. It offers future-returning shorthands (`initialize`,
+      `new_session`, `prompt`, `cancel`, `request_permission`, `read_text_file`, …), `request<Result>()` and `notify()`.
+    - Requests run off the reader thread, so hooks may block on replies. `Dispatch::serial` (the default) and
+      `Dispatch::concurrent` select the dispatch mode.
+    - Notifications are processed in arrival order before the reply that follows them, so `session/cancel` can interrupt
+      a running prompt.
+    - Outstanding requests fail with `-32603` when the peer disconnects.
+- **`buraq::transport::Process`** (`buraq/transport/process.hpp`): a portable subprocess with piped stdio, env/cwd
+  options and graceful termination.
+- **Deferred replies:** request hooks may take a `buraq::Responder<Result>` and reply later from any thread. Dropping it
+  unanswered sends `-32603`.
+- **Typed agent → client requests:** `request_permission`, `request_fs_*`, `request_terminal_*`, `request_elicitation`,
+  `request_ext_method` and `send_request<Result>` take a callback or `buraq::use_future`. `ClientBase::send_*` now
+  accept `buraq::use_future` as well.
+    - `pending_count()` and `cancel_all_pending()` are available on both bases.
 - Exceptions escaping a request hook are answered with `-32603` instead of propagating out of `feed()`.
 - `_meta` (`std::optional<RawJson>`) on every schema struct, round-tripped by both codecs.
 - `v1::Unknown{tag, raw}` alternative on every tagged union. Unknown tags decode into it and re-encode verbatim.
 - The Glaze codec now accepts `null` for optional members, matching nlohmann.
-- `tests/runtime_test.cpp`: in-process connection pairs for both codecs and dispatch modes, EOF handling, and spawning the echo agent.
+- `tests/runtime_test.cpp`: in-process connection pairs for both codecs and dispatch modes, EOF handling, and spawning
+  the echo agent.
 
 ### Changed
 
 - **Breaking:**
-  - Tagged unions gained the `v1::Unknown` alternative, so exhaustive `std::visit` visitors need an extra overload.
-  - Unknown `sessionUpdate` kinds now decode as `Unknown` instead of reaching `on_unhandled_session_update`, which still receives malformed known kinds.
-- **Breaking:** the callback overloads of `ClientBase::send_*` now return `auto`, and the protected `next_id_`, `pending_requests_` and `ResponseHandler` members were removed. `AgentBase` / `ClientBase` are move-only.
+    - Tagged unions gained the `v1::Unknown` alternative, so exhaustive `std::visit` visitors need an extra overload.
+    - Unknown `sessionUpdate` kinds now decode as `Unknown` instead of reaching `on_unhandled_session_update`, which
+      still receives malformed known kinds.
+- **Breaking:** the callback overloads of `ClientBase::send_*` now return `auto`, and the protected `next_id_`,
+  `pending_requests_` and `ResponseHandler` members were removed. `AgentBase` / `ClientBase` are move-only.
 - `buraq::buraq` now links `Threads::Threads` (needed by `buraq::runtime`).
-- `examples/minimal_client.cpp` uses `spawn_agent` and also builds on Windows. `examples/echo_agent.cpp` uses `serve_stdio`.
+- `examples/minimal_client.cpp` uses `spawn_agent` and also builds on Windows. `examples/echo_agent.cpp` uses
+  `serve_stdio`.
 - `single_include/` gains `buraq/runtime/connection.hpp`.
 - vcpkg port pinned to the `v0.1.0` release archive (SHA512).
 
 ## [0.1.0] - 2026-11-18
 
-First release targeting the complete **stable ACP v1** surface. It is CONFORMANT on the official `acp-tck` v0.4.0, and its wire output is verified against `@agentclientprotocol/sdk`.
+First release targeting the complete **stable ACP v1** surface. It is CONFORMANT on the official `acp-tck` v0.4.0, and
+its wire output is verified against `@agentclientprotocol/sdk`.
 
 ### Added
 
 - **Full stable ACP v1 schema and dispatch** in `AgentBase` / `ClientBase`, for both `GlazeCodec` and `NlohmannCodec`:
-  - `authenticate`; `session/new`, `load`, `resume`, `list`, `delete`, `close`; `session/set_mode`, `set_config_option`, `set_model` (unstable).
-  - `session/prompt`, `session/cancel`, and every `session/update` variant.
-  - `session/request_permission`, `fs/*`, `terminal/*`, and elicitation.
-  - `$/cancel_request`, plus extension methods and notifications.
+    - `authenticate`; `session/new`, `load`, `resume`, `list`, `delete`, `close`; `session/set_mode`,
+      `set_config_option`, `set_model` (unstable).
+    - `session/prompt`, `session/cancel`, and every `session/update` variant.
+    - `session/request_permission`, `fs/*`, `terminal/*`, and elicitation.
+    - `$/cancel_request`, plus extension methods and notifications.
 - Negotiated-capability accessors:
-  - `AgentBase::initialized()` and `client_capabilities()`, so agents can gate `fs/*` and `terminal/*`.
-  - `ClientBase::agent_capabilities()`, `agent_info()`, and `auth_methods()`.
-- `v1::validate()`: codec-neutral checks for the spec's MUST rules (absolute paths, non-empty ids). Failures are reported as `-32602`.
+    - `AgentBase::initialized()` and `client_capabilities()`, so agents can gate `fs/*` and `terminal/*`.
+    - `ClientBase::agent_capabilities()`, `agent_info()`, and `auth_methods()`.
+- `v1::validate()`: codec-neutral checks for the spec's MUST rules (absolute paths, non-empty ids). Failures are
+  reported as `-32602`.
 - Single-header distribution in `single_include/`, generated by `scripts/amalgamate.py`. CI runs it with `--check`.
-- Code coverage: the `BURAQ_ENABLE_COVERAGE` option and `buraq_coverage` target (gcovr). CI enforces a 90% line-coverage gate and publishes a README badge.
+- Code coverage: the `BURAQ_ENABLE_COVERAGE` option and `buraq_coverage` target (gcovr). CI enforces a 90% line-coverage
+  gate and publishes a README badge.
 - `stdio_e2e_test`: the minimal client drives the echo agent over real pipes.
 - CI jobs for the ACP conformance kit (`acp-tck`) and the official TypeScript SDK wire check.
 - Packaging:
-  - vcpkg port in `ports/buraq`, with `glaze` / `nlohmann-json` features and a `scripts/vcpkg_port.py` helper (`pin`, `overlay`).
-  - Conan 2 recipe `conanfile.py`, with `with_glaze` / `with_nlohmann_json` options.
-  - Shared `test_package/` consumer, with CI jobs for both package managers.
+    - vcpkg port in `ports/buraq`, with `glaze` / `nlohmann-json` features and a `scripts/vcpkg_port.py` helper (`pin`,
+      `overlay`).
+    - Conan 2 recipe `conanfile.py`, with `with_glaze` / `with_nlohmann_json` options.
+    - Shared `test_package/` consumer, with CI jobs for both package managers.
 - `CONTRIBUTING.md`, `SECURITY.md`, and `CHANGELOG.md`.
-- Doxygen `///` documentation for every public header, a `buraq_docs` CMake target (`BURAQ_BUILD_DOCS`, `BURAQ_DOCS_WARN_AS_ERROR`), and a `Docs` workflow that publishes the API reference to GitHub Pages.
+- Doxygen `///` documentation for every public header, a `buraq_docs` CMake target (`BURAQ_BUILD_DOCS`,
+  `BURAQ_DOCS_WARN_AS_ERROR`), and a `Docs` workflow that publishes the API reference to GitHub Pages.
 
 ### Changed
 
-- `GlazeCodec` now supports Glaze 4.4.3 through 9.x. The customization namespace is detected automatically; override it with `BURAQ_GLAZE_LEGACY_DETAIL_NAMESPACE`.
-- Untagged default alternatives (`McpServerStdio`, `AuthMethodAgent`) never emit a `type` key, whichever codec or Glaze version is used.
+- `GlazeCodec` now supports Glaze 4.4.3 through 9.x. The customization namespace is detected automatically; override it
+  with `BURAQ_GLAZE_LEGACY_DETAIL_NAMESPACE`.
+- Untagged default alternatives (`McpServerStdio`, `AuthMethodAgent`) never emit a `type` key, whichever codec or Glaze
+  version is used.
 - The installed `buraqConfigVersion.cmake` is architecture-independent (header-only).
-- **Breaking:** `mcpServers` is now `std::vector<v1::McpServer>`, a variant of `McpServerHttp`, `McpServerSse`, and `McpServerStdio`. Brace-initialization needs an explicit `McpServerStdio{...}`.
-- **Breaking:** `AvailableCommand::inputHint` is replaced by `AvailableCommand::input` (`AvailableCommandInput{.hint = ...}`), matching the schema.
+- **Breaking:** `mcpServers` is now `std::vector<v1::McpServer>`, a variant of `McpServerHttp`, `McpServerSse`, and
+  `McpServerStdio`. Brace-initialization needs an explicit `McpServerStdio{...}`.
+- **Breaking:** `AvailableCommand::inputHint` is replaced by `AvailableCommand::input`
+  (`AvailableCommandInput{.hint = ...}`), matching the schema.
 - **Breaking:** `PromptCapabilities` moved to namespace scope (`v1::PromptCapabilities`). The nested alias is kept.
-- **Breaking:** if the agent implements `on_initialize`, requests other than `initialize` are rejected until the connection is initialized.
+- **Breaking:** if the agent implements `on_initialize`, requests other than `initialize` are rejected until the
+  connection is initialized.
 - **Breaking:** requests with relative paths or empty ids are rejected with `-32602`.
 
 ### Fixed
 
-- Glaze decoding of unions with an untagged default alternative: `McpServer` without `type` decodes as stdio, and `AuthMethod` without `type` decodes as agent.
+- Glaze decoding of unions with an untagged default alternative: `McpServer` without `type` decodes as stdio, and
+  `AuthMethod` without `type` decodes as agent.
 - Unknown JSON keys, such as ACP `_meta` and newer host extensions, are ignored by both codecs.
 
 ## [0.0.1]
 
-- Initial preview: core JSON-RPC 2.0 framing, CRTP `AgentBase` / `ClientBase`, stdio transport, and the Glaze / nlohmann codecs.
+- Initial preview: core JSON-RPC 2.0 framing, CRTP `AgentBase` / `ClientBase`, stdio transport, and the Glaze / nlohmann
+  codecs.
 
 [Unreleased]: https://github.com/khubaibumer/buraq/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/khubaibumer/buraq/compare/v0.0.1...v0.1.0
