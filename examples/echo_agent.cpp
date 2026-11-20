@@ -4,7 +4,7 @@
 
 #include <buraq/acp.hpp>
 #include <buraq/codecs/glaze.hpp>
-#include <buraq/transport/stdio.hpp>
+#include <buraq/runtime/connection.hpp>
 
 class EchoAgent : public buraq::AgentBase<EchoAgent, buraq::GlazeCodec> {
     std::map<std::string, std::string> sessions_{}; // sessionId -> cwd
@@ -93,5 +93,5 @@ public:
 
 int main() {
     EchoAgent agent;
-    return buraq::transport::run_stdio_agent(agent);
+    return buraq::runtime::serve_stdio(agent);
 }

@@ -85,8 +85,10 @@ jobs:
       - name: Compile zero-dependency single header standalone
         run: |
           printf '#include <buraq/acp.hpp>\nint main() { return 0; }\n' > sh.cpp
+          printf '#include <buraq/runtime/connection.hpp>\nint main() { return 0; }\n' > rt.cpp
           for std in 20 23; do
             g++ -std=c++${std} -Wall -Wextra -Wpedantic -Werror -Isingle_include sh.cpp -o sh
+            g++ -std=c++${std} -Wall -Wextra -Wpedantic -Werror -pthread -Isingle_include rt.cpp -o rt
           done
 
   sdk-compliance:

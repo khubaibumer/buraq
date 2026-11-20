@@ -5,8 +5,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`buraq::runtime`** (`buraq/runtime/connection.hpp`): a threaded connection that removes the boilerplate around the sans-I/O core.
+  - `serve_stdio(agent)` serves an agent over stdin/stdout.
+  - `spawn_agent(client, argv, SpawnOptions)` launches an agent process (POSIX and Windows) and returns a running connection.
+  - `Connection<Peer>` works over any `LineChannel`. It offers future-returning shorthands (`initialize`, `new_session`, `prompt`, `cancel`, `request_permission`, `read_text_file`, …), `request<Result>()` and `notify()`.
+  - Requests run off the reader thread, so hooks may block on replies. `Dispatch::serial` (the default) and `Dispatch::concurrent` select the dispatch mode.
+  - Notifications are processed in arrival order before the reply that follows them, so `session/cancel` can interrupt a running prompt.
+  - Outstanding requests fail with `-32603` when the peer disconnects.
+- **`buraq::transport::Process`** (`buraq/transport/process.hpp`): a portable subprocess with piped stdio, env/cwd options and graceful termination.
+- **Deferred replies:** request hooks may take a `buraq::Responder<Result>` and reply later from any thread. Dropping it unanswered sends `-32603`.
+- **Typed agent → client requests:** `request_permission`, `request_fs_*`, `request_terminal_*`, `request_elicitation`, `request_ext_method` and `send_request<Result>` take a callback or `buraq::use_future`. `ClientBase::send_*` now accept `buraq::use_future` as well.
+  - `pending_count()` and `cancel_all_pending()` are available on both bases.
+- Exceptions escaping a request hook are answered with `-32603` instead of propagating out of `feed()`.
+- `_meta` (`std::optional<RawJson>`) on every schema struct, round-tripped by both codecs.
+- `v1::Unknown{tag, raw}` alternative on every tagged union. Unknown tags decode into it and re-encode verbatim.
+- The Glaze codec now accepts `null` for optional members, matching nlohmann.
+- `tests/runtime_test.cpp`: in-process connection pairs for both codecs and dispatch modes, EOF handling, and spawning the echo agent.
+
 ### Changed
 
+- **Breaking:**
+  - Tagged unions gained the `v1::Unknown` alternative, so exhaustive `std::visit` visitors need an extra overload.
+  - Unknown `sessionUpdate` kinds now decode as `Unknown` instead of reaching `on_unhandled_session_update`, which still receives malformed known kinds.
+- **Breaking:** the callback overloads of `ClientBase::send_*` now return `auto`, and the protected `next_id_`, `pending_requests_` and `ResponseHandler` members were removed. `AgentBase` / `ClientBase` are move-only.
+- `buraq::buraq` now links `Threads::Threads` (needed by `buraq::runtime`).
+- `examples/minimal_client.cpp` uses `spawn_agent` and also builds on Windows. `examples/echo_agent.cpp` uses `serve_stdio`.
+- `single_include/` gains `buraq/runtime/connection.hpp`.
 - vcpkg port pinned to the `v0.1.0` release archive (SHA512).
 
 ## [0.1.0] - 2026-11-18

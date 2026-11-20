@@ -1,4 +1,8 @@
 #include <algorithm>
+#include <chrono>
+#include <future>
+#include <stdexcept>
+#include <utility>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -310,7 +314,7 @@ void run_protocol_hardening_suite() {
         CHECK(std::holds_alternative<buraq::v1::PermissionSelectedOutcome>(perm->outcome));
     }
 
-    // 5. current_mode_update round-trips; unmodelled sessionUpdate kinds reach the opt-in hook
+    // 5. current_mode_update round-trips; unmodelled sessionUpdate kinds decode as v1::Unknown
     {
         LenientClient<Codec> client;
         const std::string mode_update =
@@ -331,11 +335,28 @@ void run_protocol_hardening_suite() {
             R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":)"
             R"({"sessionUpdate":"some_future_update","payload":{"x":1}}}})";
         CHECK(client.feed(as_bytes(future_update), sink).has_value());
-        CHECK(client.unhandled.size() == 1 && client.updates.size() == 1);
+        CHECK(client.unhandled.empty() && client.updates.size() == 2);
+        const auto* unknown = std::get_if<buraq::v1::Unknown>(&client.updates[1].update);
+        CHECK(unknown != nullptr && unknown->tag == "some_future_update");
+        CHECK(unknown != nullptr && unknown->raw.json.find("\"payload\"") != std::string::npos);
 
-        // Without the hook, the decode failure is surfaced to the transport loop
+        // Unknown alternatives are written back verbatim
+        const auto re_encoded = Codec::encode_notification("session/update", client.updates[1]);
+        auto re_env = Codec::parse_envelope(as_bytes(re_encoded));
+        CHECK(re_env.has_value());
+        auto re_decoded = Codec::template decode<buraq::v1::SessionUpdateNotification>(re_env->params_json);
+        CHECK(re_decoded.has_value() && std::holds_alternative<buraq::v1::Unknown>(re_decoded->update));
+        CHECK(re_decoded.has_value() && std::get<buraq::v1::Unknown>(re_decoded->update).tag == "some_future_update");
+
+        // Malformed known kinds still reach the opt-in hook; without it they surface to the transport loop
+        const std::string malformed_update =
+            R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":)"
+            R"({"sessionUpdate":"current_mode_update","currentModeId":42}}})";
+        CHECK(client.feed(as_bytes(malformed_update), sink).has_value());
+        CHECK(client.unhandled.size() == 1 && client.updates.size() == 2);
         FullTestClient<Codec> strict;
-        CHECK(!strict.feed(as_bytes(future_update), sink).has_value());
+        CHECK(!strict.feed(as_bytes(malformed_update), sink).has_value());
+        CHECK(strict.feed(as_bytes(future_update), sink).has_value());
     }
 }
 
@@ -487,6 +508,7 @@ public:
             CompactionUpdate{.compactionId = "cp1", .status = "completed",
                              .summary = std::vector<ContentBlock>{TextContent{.text = "sum"}}},
             CompactionSummaryChunk{.compactionId = "cp1", .content = TextContent{.text = "chunk"}},
+            buraq::v1::Unknown{.tag = "future_kind", .raw = buraq::RawJson{R"({"sessionUpdate":"future_kind","n":7})"}},
         };
         for (const auto& u : all) {
             this->emit_session_update(SessionUpdateNotification{.sessionId = p.sessionId, .update = u}, sink);
@@ -704,7 +726,7 @@ void run_stable_surface_suite() {
     pump();
     CHECK(done);
 
-    // 8. Prompt: all 14 sessionUpdate kinds, elicitation round-trip, ext methods/notifications, $/cancel_request
+    // 8. Prompt: all 14 sessionUpdate kinds + an unknown one, elicitation round-trip, ext methods/notifications, $/cancel_request
     done = false;
     client.send_session_prompt({.sessionId = sid, .prompt = {TextContent{.text = "go"}}}, agent_in,
         [&](buraq::expected<SessionPromptResult, buraq::RpcError> r) {
@@ -729,6 +751,7 @@ void run_stable_surface_suite() {
         CHECK(std::get<NoticeUpdate>(client.updates[11]).severity == "warning");
         CHECK(std::get<CompactionUpdate>(client.updates[12]).summary->size() == 1);
         CHECK(std::get<CompactionSummaryChunk>(client.updates[13]).compactionId == "cp1");
+        CHECK(std::get<buraq::v1::Unknown>(client.updates[14]).tag == "future_kind");
     }
     CHECK(client.elicitation && client.elicitation->mode == "form" && client.elicitation->sessionId == sid);
     CHECK(client.elicitation->requestedSchema && client.elicitation->requestedSchema->json.find("properties") != std::string::npos);
@@ -839,6 +862,7 @@ void run_cross_codec_parity_suite() {
         NoticeUpdate{.title = "n", .description = "d"},
         CompactionUpdate{.compactionId = "c", .error = "boom"},
         CompactionSummaryChunk{.compactionId = "c", .content = TextContent{.text = "s"}},
+        buraq::v1::Unknown{.tag = "x_kind", .raw = buraq::RawJson{R"({"sessionUpdate":"x_kind","v":[1,2]})"}},
     };
     for (const auto& p : payloads) {
         check_cross_codec_both(SessionUpdateNotification{.sessionId = "s", .update = p});
@@ -1021,10 +1045,208 @@ void run_codec_suite(std::string_view codec_name) {
 
 } // namespace
 
+// --- Deferred (asynchronous) handlers, typed agent -> client requests, forward compatibility ---
+template <buraq::JsonCodec Codec>
+class DeferredAgent : public buraq::AgentBase<DeferredAgent<Codec>, Codec> {
+public:
+    std::optional<buraq::Responder<buraq::v1::SessionPromptResult>> pending_prompt{};
+    std::vector<buraq::v1::ContentBlock> last_prompt{};
+    std::optional<buraq::expected<buraq::v1::RequestPermissionResult, buraq::RpcError>> permission{};
+
+    buraq::expected<buraq::v1::InitializeResult, buraq::RpcError> on_initialize(const buraq::v1::InitializeParams&) {
+        return buraq::v1::InitializeResult{};
+    }
+
+    // Synchronous hook that throws: the base must answer -32603 instead of propagating
+    buraq::expected<buraq::v1::SessionNewResult, buraq::RpcError> on_session_new(const buraq::v1::SessionNewParams& p) {
+        if (p.cwd == "/throw") throw std::runtime_error("boom");
+        return buraq::v1::SessionNewResult{.sessionId = "s1"};
+    }
+
+    // Deferred hook: reply later, from anywhere
+    void on_session_prompt(const buraq::v1::SessionPromptParams& p,
+                           buraq::Responder<buraq::v1::SessionPromptResult> done) {
+        last_prompt = p.prompt;
+        this->emit_session_update(
+            buraq::v1::SessionUpdateNotification{
+                .sessionId = p.sessionId,
+                .update = buraq::v1::AgentMessageChunk{.content = buraq::v1::TextContent{.text = "thinking"}}},
+            done.sink());
+        this->request_permission(
+            buraq::v1::RequestPermissionParams{
+                .sessionId = p.sessionId,
+                .toolCall = buraq::v1::PermissionToolCallInfo{.toolCallId = "t1"},
+                .options = {{"allow", "Allow", "allow_once"}}},
+            done.sink(),
+            [this](buraq::expected<buraq::v1::RequestPermissionResult, buraq::RpcError> r) { permission = r; });
+        pending_prompt = std::move(done);
+    }
+
+    // Deferred extension method that drops its responder
+    void on_ext_method(std::string_view, const buraq::RawJson&, buraq::Responder<buraq::RawJson>) {}
+};
+
+template <buraq::JsonCodec Codec>
+class DeferredClient : public buraq::ClientBase<DeferredClient<Codec>, Codec> {
+public:
+    std::vector<buraq::v1::SessionUpdateNotification> updates{};
+    std::optional<buraq::Responder<buraq::v1::RequestPermissionResult>> pending_permission{};
+    std::string last_option{};
+
+    void on_session_update(const buraq::v1::SessionUpdateNotification& n) { updates.push_back(n); }
+
+    void on_request_permission(const buraq::v1::RequestPermissionParams& p,
+                               buraq::Responder<buraq::v1::RequestPermissionResult> r) {
+        last_option = p.options.at(0).optionId;
+        pending_permission = std::move(r);
+    }
+
+    buraq::expected<buraq::v1::FsReadTextFileResult, buraq::RpcError>
+    on_fs_read_text_file(const buraq::v1::FsReadTextFileParams&) {
+        throw std::runtime_error("disk on fire");
+    }
+};
+
+template <buraq::JsonCodec Codec>
+void run_async_suite() {
+    using namespace buraq::v1;
+    DeferredAgent<Codec> agent;
+    DeferredClient<Codec> client;
+    std::vector<std::string> to_agent;
+    std::vector<std::string> to_client;
+    CaptureSink agent_in{to_agent};
+    CaptureSink client_in{to_client};
+    auto pump = [&] {
+        while (!to_agent.empty() || !to_client.empty()) {
+            auto a = std::exchange(to_agent, {});
+            for (const auto& f : a) CHECK(agent.feed(as_bytes(f), client_in).has_value());
+            auto c = std::exchange(to_client, {});
+            for (const auto& f : c) CHECK(client.feed(as_bytes(f), agent_in).has_value());
+        }
+    };
+
+    // 1. use_future on the client side
+    auto init = client.send_initialize(InitializeParams{.protocolVersion = kProtocolVersion}, agent_in, buraq::use_future);
+    pump();
+    CHECK(init.wait_for(std::chrono::seconds(0)) == std::future_status::ready);
+    CHECK(init.get().has_value());
+
+    // 2. A throwing synchronous handler becomes -32603 with the exception message
+    auto thrown = client.send_session_new(SessionNewParams{.cwd = "/throw"}, agent_in, buraq::use_future);
+    pump();
+    auto thrown_r = thrown.get();
+    CHECK(!thrown_r.has_value() && thrown_r.error().code == buraq::error_code::internal_error);
+    CHECK(thrown_r.error().message.find("boom") != std::string::npos);
+
+    // 3. Deferred prompt: updates and a typed permission request flow before the reply
+    std::optional<buraq::expected<SessionPromptResult, buraq::RpcError>> prompt_r{};
+    client.send_session_prompt(
+        SessionPromptParams{.sessionId = "s1",
+                            .prompt = {TextContent{.text = "hi"},
+                                       buraq::v1::Unknown{.tag = "hologram", .raw = buraq::RawJson{R"({"type":"hologram","z":1})"}}}},
+        agent_in, [&](buraq::expected<SessionPromptResult, buraq::RpcError> r) { prompt_r = std::move(r); });
+    pump();
+    CHECK(agent.pending_prompt && !agent.pending_prompt->done());
+    CHECK(!prompt_r);
+    CHECK(agent.last_prompt.size() == 2 && std::get<buraq::v1::Unknown>(agent.last_prompt[1]).tag == "hologram");
+    CHECK(client.updates.size() == 1);
+    CHECK(client.pending_permission && client.last_option == "allow");
+    CHECK(agent.pending_count() == 1 && !agent.permission);
+
+    // Client answers the permission request later
+    CHECK(client.pending_permission->respond(RequestPermissionResult{.outcome = PermissionSelectedOutcome{.optionId = "allow"}}));
+    CHECK(!client.pending_permission->respond(RequestPermissionResult{})); // first reply wins
+    pump();
+    CHECK(agent.permission && agent.permission->has_value());
+    CHECK(std::get<PermissionSelectedOutcome>((*agent.permission)->outcome).optionId == "allow");
+    CHECK(agent.pending_count() == 0);
+
+    // Agent finishes the turn later
+    CHECK(agent.pending_prompt->respond(SessionPromptResult{.stopReason = "end_turn"}));
+    pump();
+    CHECK(prompt_r && prompt_r->has_value() && (*prompt_r)->stopReason == "end_turn");
+
+    // 4. A dropped Responder answers -32603 instead of hanging the peer
+    auto dropped = client.send_ext_method("_x/drop", buraq::RawJson{"{}"}, agent_in, buraq::use_future);
+    pump();
+    auto dropped_r = dropped.get();
+    CHECK(!dropped_r.has_value() && dropped_r.error().code == buraq::error_code::internal_error);
+
+    // 5. Typed agent -> client request with use_future; a throwing client hook becomes -32603
+    auto read = agent.request_fs_read(FsReadTextFileParams{.sessionId = "s1", .path = "/a"}, client_in, buraq::use_future);
+    CHECK(agent.pending_count() == 1);
+    pump();
+    auto read_r = read.get();
+    CHECK(!read_r.has_value() && read_r.error().message.find("disk on fire") != std::string::npos);
+
+    // 6. cancel_all_pending fails in-flight requests (e.g. on disconnect)
+    auto orphan = agent.request_terminal_output(TerminalOutputParams{.sessionId = "s1", .terminalId = "t"},
+                                                client_in, buraq::use_future);
+    to_client.clear();
+    agent.cancel_all_pending();
+    auto orphan_r = orphan.get();
+    CHECK(!orphan_r.has_value() && orphan_r.error().code == buraq::RpcError::request_cancelled().code);
+    CHECK(agent.pending_count() == 0);
+
+    // 7. Generic typed request for methods the SDK does not model
+    std::optional<std::string> raw_result{};
+    client.template send_request<buraq::RawJson>("_x/drop", buraq::RawJson{"{}"}, agent_in,
+        [&](buraq::expected<buraq::RawJson, buraq::RpcError> r) { raw_result = r ? r->json : r.error().message; });
+    pump();
+    CHECK(raw_result.has_value());
+
+    // 8. `_meta` round-trips on params and nested types
+    const std::string with_meta =
+        R"({"protocolVersion":1,"_meta":{"trace":"abc"},"clientCapabilities":{"fs":{"readTextFile":true},"_meta":{"x.custom":{"on":true}}}})";
+    auto decoded = Codec::template decode<InitializeParams>(with_meta);
+    CHECK(decoded.has_value() && decoded->_meta && decoded->_meta->json.find("abc") != std::string::npos);
+    CHECK(decoded->clientCapabilities._meta && decoded->clientCapabilities._meta->json.find("x.custom") != std::string::npos);
+    const auto re = Codec::encode_notification("x", *decoded);
+    CHECK(re.find(R"("_meta")") != std::string::npos && re.find("x.custom") != std::string::npos);
+    auto re_env = Codec::parse_envelope(as_bytes(re));
+    CHECK(re_env.has_value());
+    auto re_dec = Codec::template decode<InitializeParams>(re_env->params_json);
+    CHECK(re_dec.has_value() && re_dec->clientCapabilities._meta == decoded->clientCapabilities._meta);
+    CHECK(Codec::encode_notification("x", SessionDeleteResult{}).find("_meta") == std::string::npos);
+
+    // 9. `null` members are treated as absent; nulls inside raw JSON survive
+    auto lenient = Codec::template decode<SessionNewParams>(
+        R"({"cwd" : "/w", "mcpServers" : null, "_meta":null, "systemPrompt":null})");
+    CHECK(lenient.has_value() && lenient->cwd == "/w" && lenient->mcpServers.empty() && !lenient->_meta);
+    auto nested = Codec::template decode<SessionPromptParams>(
+        R"({"sessionId":"s","prompt":[{"type":"text","text":"hi","annotations":null},{"type":"text","text":"x, \"null\": null"}]})");
+    CHECK(nested.has_value() && nested->prompt.size() == 2);
+    CHECK(std::get<TextContent>(nested->prompt[1]).text == "x, \"null\": null");
+    auto raw_nulls = Codec::template decode<ToolCallUpdate>(R"({"toolCallId":"t","title":"x","rawInput":{"a":null}})");
+    CHECK(raw_nulls.has_value() && raw_nulls->rawInput && raw_nulls->rawInput->json.find("null") != std::string::npos);
+
+    // 10. Unknown tags in every union; missing required tags still fail; untagged defaults still apply
+    auto mcp = Codec::template decode<SessionNewParams>(
+        R"({"cwd":"/w","mcpServers":[{"type":"websocket","name":"w","url":"ws://x"},{"name":"s","command":"/c"}]})");
+    CHECK(mcp.has_value() && mcp->mcpServers.size() == 2);
+    CHECK(std::get<buraq::v1::Unknown>(mcp->mcpServers[0]).tag == "websocket");
+    CHECK(std::holds_alternative<McpServerStdio>(mcp->mcpServers[1]));
+    auto auth = Codec::template decode<InitializeResult>(
+        R"({"protocolVersion":1,"authMethods":[{"type":"oauth","id":"o","name":"O"},{"id":"a","name":"A"}]})");
+    CHECK(auth.has_value() && std::get<buraq::v1::Unknown>(auth->authMethods[0]).tag == "oauth");
+    CHECK(std::holds_alternative<AuthMethodAgent>(auth->authMethods[1]));
+    auto outcome = Codec::template decode<RequestPermissionResult>(R"({"outcome":{"outcome":"deferred"}})");
+    CHECK(outcome.has_value() && std::get<buraq::v1::Unknown>(outcome->outcome).tag == "deferred");
+    auto tool = Codec::template decode<ToolCallUpdate>(
+        R"({"toolCallId":"t","title":"x","content":[{"type":"chart","data":[1]}]})");
+    CHECK(tool.has_value() && std::get<buraq::v1::Unknown>(tool->content->at(0)).tag == "chart");
+    CHECK(!Codec::template decode<SessionPromptParams>(R"({"sessionId":"s","prompt":[{"text":"no tag"}]})").has_value());
+    const auto stub = Codec::encode_notification("x", RequestPermissionResult{.outcome = buraq::v1::Unknown{.tag = "later"}});
+    CHECK(stub.find(R"({"outcome":"later"})") != std::string::npos);
+}
+
 int main() {
     run_codec_suite<buraq::GlazeCodec>("GlazeCodec");
     run_codec_suite<buraq::NlohmannCodec>("NlohmannCodec");
     run_cross_codec_parity_suite();
+    run_async_suite<buraq::GlazeCodec>();
+    run_async_suite<buraq::NlohmannCodec>();
+    std::cout << "[PASS] Async / forward-compatibility suite passed!\n";
     std::cout << "All buraq ACP v1 dispatch & codec parity tests passed.\n";
     return 0;
 }

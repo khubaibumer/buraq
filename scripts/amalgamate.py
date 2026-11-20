@@ -4,6 +4,7 @@
 Outputs:
   single_include/buraq/acp.hpp             core protocol + AgentBase/ClientBase + stdio transport
                                            (zero third-party dependencies)
+  single_include/buraq/runtime/connection.hpp  threaded runtime: Connection, serve_stdio, spawn_agent
   single_include/buraq/codecs/glaze.hpp    GlazeCodec adapter (requires Glaze)
   single_include/buraq/codecs/nlohmann.hpp NlohmannCodec adapter (requires nlohmann/json)
 
@@ -27,7 +28,12 @@ INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"](buraq/[^>"]+)[>"]')
 PRAGMA_ONCE_RE = re.compile(r"^\s*#\s*pragma\s+once\b")
 
 CORE_ENTRYPOINTS = ["buraq/acp.hpp", "buraq/transport/stdio.hpp"]
-CODECS = ["buraq/codecs/glaze.hpp", "buraq/codecs/nlohmann.hpp"]
+# Opt-in add-ons, each emitted as its own header on top of acp.hpp (same include path as the modular tree).
+ADDONS = {
+    "buraq/codecs/glaze.hpp": "Requires buraq/acp.hpp from this single_include tree and Glaze.",
+    "buraq/codecs/nlohmann.hpp": "Requires buraq/acp.hpp from this single_include tree and nlohmann/json.",
+    "buraq/runtime/connection.hpp": "Requires buraq/acp.hpp from this single_include tree; link with threads.",
+}
 
 
 def project_version() -> str:
@@ -91,16 +97,17 @@ def render_core() -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def render_codec(rel: str) -> str:
-    out = banner(rel, "Requires buraq/acp.hpp from this single_include tree.")
-    out.append('#include "../acp.hpp"')
+def render_addon(rel: str, note: str) -> str:
+    out = banner(rel, note)
+    out.append('#include "' + "../" * (rel.count("/") - 1) + 'acp.hpp"')
     out.append("")
-    # Core headers are already provided by ../acp.hpp; only inline the codec body.
+    # Core headers are already provided by acp.hpp; only inline the add-on body.
     seen = {
         "buraq/acp.hpp",
         "buraq/detail/compat.hpp",
         "buraq/protocol/jsonrpc.hpp",
         "buraq/protocol/schema_v1.hpp",
+        "buraq/core/async.hpp",
         "buraq/core/agent_base.hpp",
         "buraq/core/client_base.hpp",
         "buraq/transport/stdio.hpp",
@@ -111,8 +118,8 @@ def render_codec(rel: str) -> str:
 
 def outputs() -> dict[Path, str]:
     result = {OUT_DIR / "buraq/acp.hpp": render_core()}
-    for codec in CODECS:
-        result[OUT_DIR / codec] = render_codec(codec)
+    for rel, note in ADDONS.items():
+        result[OUT_DIR / rel] = render_addon(rel, note)
     return result
 
 

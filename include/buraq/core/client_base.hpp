@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <type_traits>
+#include "buraq/core/async.hpp"
 #include "buraq/detail/compat.hpp"
 #include "buraq/protocol/jsonrpc.hpp"
 #include "buraq/protocol/schema_v1.hpp"
@@ -93,6 +95,10 @@ namespace buraq {
 /// @see AgentBase
 template <typename Derived, JsonCodec Codec>
 class ClientBase {
+public:
+    /// JSON codec this client encodes and decodes with.
+    using codec_type = Codec;
+
 protected:
     /// Returns `*this` downcast to the derived client type.
     /// @return Mutable reference to the `Derived` object.
@@ -101,13 +107,8 @@ protected:
     /// @return Const reference to the `Derived` object.
     constexpr const Derived& self() const noexcept { return static_cast<const Derived&>(*this); }
 
-    /// Type-erased continuation invoked with the response envelope of a pending request.
-    using ResponseHandler = std::function<void(const RawEnvelope&)>;
-
-    /// Next JSON-RPC request id to allocate; starts at 1 and increments per outbound request.
-    std::int64_t next_id_{1};
-    /// In-flight typed requests keyed by request id, awaiting their response.
-    std::unordered_map<std::int64_t, ResponseHandler> pending_requests_{};
+    /// In-flight typed requests keyed by request id (thread-safe); ids start at 1.
+    detail::PendingRequests pending_{};
 
 public:
     // --- Fire-and-ID Outbound Requests (for custom correlation via on_raw_response) ---
@@ -289,23 +290,20 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::InitializeResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::InitializeResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Protocol version, client capabilities and client info.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     /// @note On success the result is also recorded for agent_capabilities(), agent_info() and auth_methods() before @p cb runs.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_initialize(const v1::InitializeParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_initialize(const v1::InitializeParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::InitializeResult>(
-            "initialize", params, std::forward<OutboundSink>(sink),
-            [this, callback = std::forward<Callback>(cb)](expected<v1::InitializeResult, RpcError> res) mutable {
-                if (res) {
-                    agent_capabilities_ = res->agentCapabilities;
-                    agent_info_ = res->agentInfo;
-                    auth_methods_ = res->authMethods;
-                }
-                callback(std::move(res));
+            "initialize", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb),
+            [this](const v1::InitializeResult& res) {
+                agent_capabilities_ = res.agentCapabilities;
+                agent_info_ = res.agentInfo;
+                auth_methods_ = res.authMethods;
             });
     }
 
@@ -313,13 +311,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::AuthenticateResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::AuthenticateResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Authentication method to use.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_authenticate(const v1::AuthenticateParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_authenticate(const v1::AuthenticateParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::AuthenticateResult>(
             "authenticate", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -328,13 +326,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::LogoutResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::LogoutResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Logout parameters.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_logout(const v1::LogoutParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_logout(const v1::LogoutParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::LogoutResult>(
             "logout", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -343,13 +341,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionNewResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionNewResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Working directory and MCP servers for the new session.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_new(const v1::SessionNewParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_new(const v1::SessionNewParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionNewResult>(
             "session/new", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -358,13 +356,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionLoadResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionLoadResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session to load.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_load(const v1::SessionLoadParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_load(const v1::SessionLoadParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionLoadResult>(
             "session/load", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -373,13 +371,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionResumeResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionResumeResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session to resume.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_resume(const v1::SessionResumeParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_resume(const v1::SessionResumeParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionResumeResult>(
             "session/resume", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -388,13 +386,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionListResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionListResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Listing filters / pagination.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_list(const v1::SessionListParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_list(const v1::SessionListParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionListResult>(
             "session/list", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -403,13 +401,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionDeleteResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionDeleteResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session to delete.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_delete(const v1::SessionDeleteParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_delete(const v1::SessionDeleteParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionDeleteResult>(
             "session/delete", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -418,13 +416,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionCloseResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionCloseResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session to close.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_close(const v1::SessionCloseParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_close(const v1::SessionCloseParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionCloseResult>(
             "session/close", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -433,13 +431,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetModeResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetModeResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session and mode id.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_set_mode(const v1::SessionSetModeParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_set_mode(const v1::SessionSetModeParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionSetModeResult>(
             "session/set_mode", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -448,13 +446,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetConfigOptionResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetConfigOptionResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session, option id and value.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_set_config_option(const v1::SessionSetConfigOptionParams& params,
+    auto send_session_set_config_option(const v1::SessionSetConfigOptionParams& params,
                                                 OutboundSink&& sink,
                                                 Callback&& cb) {
         return send_request_typed<v1::SessionSetConfigOptionResult>(
@@ -466,14 +464,14 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetModelResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetModelResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session and model id.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     /// @note UNSTABLE: `session/set_model` is not part of the stable ACP v1 schema.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_set_model(const v1::SessionSetModelParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_set_model(const v1::SessionSetModelParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionSetModelResult>(
             "session/set_model", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -482,27 +480,27 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionPromptResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionPromptResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session id and prompt content blocks.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_prompt(const v1::SessionPromptParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_prompt(const v1::SessionPromptParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionPromptResult>(
             "session/prompt", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
 
     /// Sends a custom extension request and invokes @p cb with the raw JSON reply.
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<RawJson, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<RawJson, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param method Extension method name; ACP reserves `_`-prefixed names for extensions.
     /// @param params Raw JSON parameters.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_ext_method(std::string_view method, const RawJson& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_ext_method(std::string_view method, const RawJson& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<RawJson>(method, params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
 
@@ -558,8 +556,8 @@ public:
 
     /// Returns the number of typed requests still awaiting a response.
     /// @return Size of the pending-request table.
-    [[nodiscard]] std::size_t pending_count() const noexcept {
-        return pending_requests_.size();
+    [[nodiscard]] std::size_t pending_count() const {
+        return pending_.size();
     }
 
     // Fail and clear all in-flight requests (useful on transport disconnect)
@@ -567,12 +565,20 @@ public:
     /// Each pending callback is invoked with an error envelope carrying @p reason. Useful on transport disconnect.
     /// @param reason Error delivered to every pending callback; defaults to `-32800` (Request cancelled).
     void cancel_all_pending(const RpcError& reason = RpcError::request_cancelled()) {
-        auto pending = std::move(pending_requests_);
-        pending_requests_.clear();
-        for (auto& [id, handler] : pending) {
-            RawEnvelope err_env{.id = RequestId{id}, .error = reason};
-            handler(err_env);
-        }
+        pending_.cancel_all(reason);
+    }
+
+    /// Sends any request (e.g. an unstable method this SDK does not model yet) and decodes the reply as @p Result.
+    /// @tparam Result Result type to decode.
+    /// @param method JSON-RPC method name.
+    /// @param params Parameters (any type the codec can encode).
+    /// @param sink   Outbound byte sink.
+    /// @param cb     Callback `cb(expected<Result, RpcError>)` or buraq::use_future.
+    /// @return The request id (callback) or a `std::future` of the outcome (buraq::use_future).
+    template <typename Result, typename Params, typename OutboundSink, typename Callback>
+    auto send_request(std::string_view method, const Params& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<Result>(method, params, std::forward<OutboundSink>(sink),
+                                          std::forward<Callback>(cb));
     }
 
     // --- Inbound Frame Entry Point ---
@@ -627,7 +633,7 @@ private:
     /// @return The allocated request id.
     template <typename Params, typename OutboundSink>
     std::int64_t send_request_raw(std::string_view method, const Params& params, OutboundSink&& sink) {
-        const auto id = next_id_++;
+        const auto id = pending_.allocate();
         emit_bytes(Codec::encode_request(RequestId{id}, method, params), std::forward<OutboundSink>(sink));
         return id;
     }
@@ -643,22 +649,16 @@ private:
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
     /// @return The allocated request id.
-    template <typename Result, typename Params, typename OutboundSink, typename Callback>
-    std::int64_t send_request_typed(std::string_view method,
-                                    const Params& params,
-                                    OutboundSink&& sink,
-                                    Callback&& cb) {
-        const auto id = next_id_++;
-        pending_requests_.emplace(id, [callback = std::forward<Callback>(cb)](const RawEnvelope& env) mutable {
-            if (env.error.has_value()) {
-                callback(expected<Result, RpcError>(unexpected(*env.error)));
-                return;
-            }
-            callback(Codec::template decode<Result>(env.result_json));
-        });
-
-        emit_bytes(Codec::encode_request(RequestId{id}, method, params), std::forward<OutboundSink>(sink));
-        return id;
+    template <typename Result, typename Params, typename OutboundSink, typename Callback,
+              typename OnValue = detail::ignore_value>
+    auto send_request_typed(std::string_view method,
+                            const Params& params,
+                            OutboundSink&& sink,
+                            Callback&& cb,
+                            OnValue on_value = {}) {
+        return detail::send_typed_request<Result, Codec>(
+            pending_, std::forward<Callback>(cb), std::move(on_value),
+            [&](const RequestId& id) { emit_bytes(Codec::encode_request(id, method, params), sink); });
     }
 
     /// Dispatches an agent notification to the matching `Derived` hook.
@@ -739,12 +739,49 @@ private:
             return {};
         }
 
-        auto res = handler(self(), *params);
+        auto res = detail::invoke_guarded([&] { return handler(self(), *params); });
         if (!res) {
             emit_bytes(Codec::encode_error(*env.id, res.error()), sink);
         } else {
             emit_bytes(Codec::encode_result(*env.id, *res), sink);
         }
+        return {};
+    }
+
+    /// Binds a Responder to request @p id, copying @p sink into it.
+    template <typename Result, typename OutboundSink>
+    static Responder<Result> make_responder(const RequestId& id, OutboundSink& sink) {
+        static_assert(std::is_copy_constructible_v<std::remove_cvref_t<OutboundSink>>,
+                      "Deferred (Responder) handlers keep a copy of the outbound sink: it must be copy-constructible "
+                      "(wrap stateful sinks with std::ref or use a shared handle)");
+        return Responder<Result>::template create<Codec>(id, OutboundFn(sink));
+    }
+
+    /// Decodes and validates an agent request, then hands a Responder to a deferred hook.
+    /// Decode and validation failures are answered immediately; an exception escaping the hook fails the request
+    /// with `-32603`.
+    /// @tparam Params  Parameter type to decode from `params`.
+    /// @tparam Result  Result type of the request.
+    /// @tparam OutboundSink Copy-constructible sink type.
+    /// @tparam Handler Callable `(Derived&, const Params&, Responder<Result>) -> void`.
+    /// @param env     Parsed request envelope (must carry an id).
+    /// @param sink    Outbound byte sink (copied into the Responder).
+    /// @param handler Invokes the `Derived` hook.
+    /// @return Always empty.
+    template <typename Params, typename Result, typename OutboundSink, typename Handler>
+    expected<void, RpcError> handle_agent_request_deferred(const RawEnvelope& env, OutboundSink& sink,
+                                                           Handler&& handler) {
+        auto params = Codec::template decode<Params>(env.params_json);
+        if (!params) {
+            emit_bytes(Codec::encode_error(*env.id, params.error()), sink);
+            return {};
+        }
+        if (auto reason = v1::validate(*params)) {
+            emit_bytes(Codec::encode_error(*env.id, RpcError::invalid_params(*reason)), sink);
+            return {};
+        }
+        detail::invoke_deferred(make_responder<Result>(*env.id, sink),
+                                [&](Responder<Result>& r) { handler(self(), *params, r); });
         return {};
     }
 
@@ -756,76 +793,53 @@ private:
     /// @return Always empty.
     template <typename OutboundSink>
     expected<void, RpcError> dispatch_agent_request(const RawEnvelope& env, OutboundSink&& sink) {
-        if (env.method == "session/request_permission") {
-            if constexpr (requires(Derived& d, const v1::RequestPermissionParams& p) { d.on_request_permission(p); }) {
-                return handle_agent_request<v1::RequestPermissionParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_request_permission(p); });
-            }
-        }
+// Routes an agent request to `Derived::HOOK`, preferring the deferred form `void HOOK(const PARAMS&, Responder<RESULT>)`
+// over the synchronous form `expected<RESULT, RpcError> HOOK(const PARAMS&)`.
+#define BURAQ_CLIENT_ROUTE(NAME, HOOK, PARAMS, RESULT)                                                           \
+    if (env.method == NAME) {                                                                                  \
+        if constexpr (requires(Derived& d, const PARAMS& p, Responder<RESULT> r) {                             \
+                          { d.HOOK(p, std::move(r)) } -> std::same_as<void>;                                    \
+                      }) {                                                                                     \
+            return handle_agent_request_deferred<PARAMS, RESULT>(                                              \
+                env, sink, [](Derived& d, const PARAMS& p, Responder<RESULT> r) { d.HOOK(p, std::move(r)); }); \
+        } else if constexpr (requires(Derived& d, const PARAMS& p) { d.HOOK(p); }) {                           \
+            return handle_agent_request<PARAMS>(env, sink, [](Derived& d, const PARAMS& p) { return d.HOOK(p); }); \
+        }                                                                                                      \
+    }
 
-        if (env.method == "fs/read_text_file") {
-            if constexpr (requires(Derived& d, const v1::FsReadTextFileParams& p) { d.on_fs_read_text_file(p); }) {
-                return handle_agent_request<v1::FsReadTextFileParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_fs_read_text_file(p); });
-            }
-        }
+        BURAQ_CLIENT_ROUTE("session/request_permission", on_request_permission, v1::RequestPermissionParams,
+                           v1::RequestPermissionResult)
+        BURAQ_CLIENT_ROUTE("fs/read_text_file", on_fs_read_text_file, v1::FsReadTextFileParams,
+                           v1::FsReadTextFileResult)
+        BURAQ_CLIENT_ROUTE("fs/write_text_file", on_fs_write_text_file, v1::FsWriteTextFileParams,
+                           v1::FsWriteTextFileResult)
+        BURAQ_CLIENT_ROUTE("terminal/create", on_terminal_create, v1::TerminalCreateParams, v1::TerminalCreateResult)
+        BURAQ_CLIENT_ROUTE("terminal/output", on_terminal_output, v1::TerminalOutputParams, v1::TerminalOutputResult)
+        BURAQ_CLIENT_ROUTE("terminal/wait_for_exit", on_terminal_wait_for_exit, v1::TerminalWaitForExitParams,
+                           v1::TerminalWaitForExitResult)
+        BURAQ_CLIENT_ROUTE("terminal/kill", on_terminal_kill, v1::TerminalKillParams, v1::TerminalKillResult)
+        BURAQ_CLIENT_ROUTE("terminal/release", on_terminal_release, v1::TerminalReleaseParams,
+                           v1::TerminalReleaseResult)
+        BURAQ_CLIENT_ROUTE("elicitation/create", on_elicitation_create, v1::CreateElicitationParams,
+                           v1::CreateElicitationResult)
 
-        if (env.method == "fs/write_text_file") {
-            if constexpr (requires(Derived& d, const v1::FsWriteTextFileParams& p) { d.on_fs_write_text_file(p); }) {
-                return handle_agent_request<v1::FsWriteTextFileParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_fs_write_text_file(p); });
-            }
-        }
-
-        if (env.method == "terminal/create") {
-            if constexpr (requires(Derived& d, const v1::TerminalCreateParams& p) { d.on_terminal_create(p); }) {
-                return handle_agent_request<v1::TerminalCreateParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_create(p); });
-            }
-        }
-
-        if (env.method == "terminal/output") {
-            if constexpr (requires(Derived& d, const v1::TerminalOutputParams& p) { d.on_terminal_output(p); }) {
-                return handle_agent_request<v1::TerminalOutputParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_output(p); });
-            }
-        }
-
-        if (env.method == "terminal/wait_for_exit") {
-            if constexpr (requires(Derived& d, const v1::TerminalWaitForExitParams& p) {
-                d.on_terminal_wait_for_exit(p);
-            }) {
-                return handle_agent_request<v1::TerminalWaitForExitParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_wait_for_exit(p); });
-            }
-        }
-
-        if (env.method == "terminal/kill") {
-            if constexpr (requires(Derived& d, const v1::TerminalKillParams& p) { d.on_terminal_kill(p); }) {
-                return handle_agent_request<v1::TerminalKillParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_kill(p); });
-            }
-        }
-
-        if (env.method == "terminal/release") {
-            if constexpr (requires(Derived& d, const v1::TerminalReleaseParams& p) { d.on_terminal_release(p); }) {
-                return handle_agent_request<v1::TerminalReleaseParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_release(p); });
-            }
-        }
-
-        if (env.method == "elicitation/create") {
-            if constexpr (requires(Derived& d, const v1::CreateElicitationParams& p) { d.on_elicitation_create(p); }) {
-                return handle_agent_request<v1::CreateElicitationParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_elicitation_create(p); });
-            }
-        }
+#undef BURAQ_CLIENT_ROUTE
 
         if (!env.method.empty() && env.method.front() == '_') {
-            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
+            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p, Responder<RawJson> r) {
+                { d.on_ext_method(m, p, std::move(r)) } -> std::same_as<void>;
+            }) {
+                std::string method{env.method};
+                RawJson params{std::string(env.params_json)};
+                detail::invoke_deferred(make_responder<RawJson>(*env.id, sink), [&](Responder<RawJson>& r) {
+                    self().on_ext_method(method, params, r);
+                });
+                return {};
+            } else if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
                 { d.on_ext_method(m, p) } -> std::same_as<expected<RawJson, RpcError>>;
             }) {
-                auto res = self().on_ext_method(env.method, RawJson{std::string(env.params_json)});
+                auto res = detail::invoke_guarded(
+                    [&] { return self().on_ext_method(env.method, RawJson{std::string(env.params_json)}); });
                 if (!res) {
                     emit_bytes(Codec::encode_error(*env.id, res.error()), sink);
                 } else {
@@ -844,14 +858,8 @@ private:
     /// @param env Parsed response envelope.
     /// @return Always empty.
     expected<void, RpcError> dispatch_response(const RawEnvelope& env) {
-        if (env.id && std::holds_alternative<std::int64_t>(*env.id)) {
-            const auto id = std::get<std::int64_t>(*env.id);
-            if (auto it = pending_requests_.find(id); it != pending_requests_.end()) {
-                auto handler = std::move(it->second);
-                pending_requests_.erase(it);
-                handler(env);
-                return {};
-            }
+        if (pending_.complete(env)) {
+            return {};
         }
 
         if constexpr (requires(Derived& d, const RawEnvelope& r) { d.on_raw_response(r); }) {

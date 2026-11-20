@@ -3,7 +3,7 @@
 /// @brief JSON codec backed by nlohmann/json (`buraq::NlohmannCodec`).
 ///
 /// Implements the buraq::JsonCodec concept with nlohmann/json: parses raw JSON-RPC 2.0 envelopes, decodes
-/// typed params/results while ignoring unknown keys (such as ACP `_meta`), and encodes requests,
+/// typed params/results while ignoring unknown keys (ACP `_meta` is preserved in each type's `_meta` member), and encodes requests,
 /// notifications, results and errors. Also provides ADL `to_json`/`from_json` overloads for every ACP v1
 /// schema type.
 ///
@@ -170,8 +170,8 @@ void read_alternative(const json& j, Variant& v, std::size_t index, std::index_s
 
 /// @brief Reads a tagged union, selecting the alternative by its discriminator.
 ///
-/// A missing or null tag selects the untagged alternative if the union has one; otherwise, as for an
-/// unknown tag, std::invalid_argument is thrown.
+/// A missing or null tag selects the untagged alternative if the union has one, otherwise
+/// std::invalid_argument is thrown. An unrecognized tag yields buraq::v1::Unknown holding the raw object.
 /// @tparam Variant std::variant with a buraq::v1::variant_tag specialization.
 /// @param j Source object.
 /// @param v Destination.
@@ -194,20 +194,35 @@ void read_tagged(const json& j, Variant& v, const char* type_name) {
             if (Tag::ids[i] == tag) index = i;
         }
         if (index == Tag::ids.size()) {
-            throw std::invalid_argument(std::string("Unsupported ") + type_name + " " + std::string(Tag::key) +
-                                        ": " + tag);
+            v = v1::Unknown{tag, RawJson{j.dump()}};
+            return;
         }
     }
-    read_alternative(j, v, index, std::make_index_sequence<std::variant_size_v<Variant>>{});
+    read_alternative(j, v, index, std::make_index_sequence<Tag::ids.size()>{});
 }
 
 /// @brief Writes the active alternative of a tagged union (each alternative carries its own tag).
+///
+/// buraq::v1::Unknown is written back verbatim (or as `{key: tag}` when it has no raw JSON).
 /// @tparam Variant std::variant type.
 /// @param j Destination.
 /// @param v Value.
 template <typename Variant>
 void write_tagged(json& j, const Variant& v) {
-    std::visit([&j](const auto& alt) { j = alt; }, v);
+    std::visit(
+        [&j](const auto& alt) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(alt)>, v1::Unknown>) {
+                if (alt.raw.json.empty()) {
+                    j = json::object();
+                    j[std::string(v1::variant_tag<Variant>::key)] = alt.tag;
+                } else {
+                    j = json::parse(alt.raw.json);
+                }
+            } else {
+                j = alt;
+            }
+        },
+        v);
 }
 
 } // namespace nl
@@ -263,11 +278,16 @@ inline void from_json(const nlohmann::json& j, RawJson& v) {
         BURAQ_NL_EXPAND(BURAQ_NL_FOR_EACH(BURAQ_NL_GET, __VA_ARGS__))           \
     }
 
-// Field-less types: encode as `{}`, accept `{}` or `null`
+// Field-less types (only `_meta`): encode as `{}`, accept `{}` or `null`
 #define BURAQ_NL_EMPTY(Type)                                                     \
-    inline void to_json(nlohmann::json& j, const Type&) { j = nlohmann::json::object(); } \
-    inline void from_json(const nlohmann::json& j, Type&) {                     \
-        if (!j.is_null()) ::buraq::detail::nl::expect_object(j, #Type);         \
+    inline void to_json(nlohmann::json& j, const Type& v) {                     \
+        j = nlohmann::json::object();                                           \
+        ::buraq::detail::nl::put(j, "_meta", v._meta);                          \
+    }                                                                           \
+    inline void from_json(const nlohmann::json& j, Type& v) {                   \
+        if (j.is_null()) return;                                                \
+        ::buraq::detail::nl::expect_object(j, #Type);                           \
+        ::buraq::detail::nl::get(j, "_meta", v._meta);                          \
     }
 
 #define BURAQ_NL_TAGGED(Type)                                                    \
@@ -303,18 +323,25 @@ inline void to_json(nlohmann::json& j, const AuthMethod& v);
 /// @brief Deserializes an AuthMethod (missing `type` selects the agent method).
 inline void from_json(const nlohmann::json& j, AuthMethod& v);
 
+/// @brief Serializes an unrecognized union alternative back to its raw JSON (`{}` when empty).
+inline void to_json(nlohmann::json& j, const Unknown& v) {
+    j = v.raw.json.empty() ? nlohmann::json::object() : nlohmann::json::parse(v.raw.json);
+}
+/// @brief Captures any JSON object as an Unknown alternative (tag left empty; set by the union reader).
+inline void from_json(const nlohmann::json& j, Unknown& v) { v.raw.json = j.dump(); }
+
 // --- Capabilities & Metadata ---
 BURAQ_NL_EMPTY(CapabilityMarker)
-BURAQ_NL_TYPE(FileSystemCapabilities, readTextFile, writeTextFile)
-BURAQ_NL_TYPE(SessionConfigOptionsCapabilities, boolean)
-BURAQ_NL_TYPE(ClientSessionCapabilities, compaction, configOptions, notices)
-BURAQ_NL_TYPE(ClientAuthCapabilities, terminal)
-BURAQ_NL_TYPE(ElicitationCapabilities, form, url)
-BURAQ_NL_TYPE(ClientCapabilities, fs, terminal, session, auth, elicitation)
-BURAQ_NL_TYPE(PromptCapabilities, image, audio, embeddedContext)
-BURAQ_NL_TYPE(McpCapabilities, http, sse)
-BURAQ_NL_TYPE(SystemPromptModeCapabilities, override)
-BURAQ_NL_TYPE(SystemPromptCapabilities, mode)
+BURAQ_NL_TYPE(FileSystemCapabilities, readTextFile, writeTextFile, _meta)
+BURAQ_NL_TYPE(SessionConfigOptionsCapabilities, boolean, _meta)
+BURAQ_NL_TYPE(ClientSessionCapabilities, compaction, configOptions, notices, _meta)
+BURAQ_NL_TYPE(ClientAuthCapabilities, terminal, _meta)
+BURAQ_NL_TYPE(ElicitationCapabilities, form, url, _meta)
+BURAQ_NL_TYPE(ClientCapabilities, fs, terminal, session, auth, elicitation, _meta)
+BURAQ_NL_TYPE(PromptCapabilities, image, audio, embeddedContext, _meta)
+BURAQ_NL_TYPE(McpCapabilities, http, sse, _meta)
+BURAQ_NL_TYPE(SystemPromptModeCapabilities, override, _meta)
+BURAQ_NL_TYPE(SystemPromptCapabilities, mode, _meta)
 
 // `delete` is a C++ keyword; the member is spelled `delete_`
 /// @brief Serializes SessionCapabilities, mapping member `delete_` to key `delete`.
@@ -326,6 +353,7 @@ inline void to_json(nlohmann::json& j, const SessionCapabilities& v) {
     ::buraq::detail::nl::put(j, "systemPrompt", v.systemPrompt);
     ::buraq::detail::nl::put(j, "resume", v.resume);
     ::buraq::detail::nl::put(j, "close", v.close);
+    ::buraq::detail::nl::put(j, "_meta", v._meta);
 }
 /// @brief Deserializes SessionCapabilities, mapping key `delete` to member `delete_`.
 inline void from_json(const nlohmann::json& j, SessionCapabilities& v) {
@@ -336,136 +364,137 @@ inline void from_json(const nlohmann::json& j, SessionCapabilities& v) {
     ::buraq::detail::nl::get(j, "systemPrompt", v.systemPrompt);
     ::buraq::detail::nl::get(j, "resume", v.resume);
     ::buraq::detail::nl::get(j, "close", v.close);
+    ::buraq::detail::nl::get(j, "_meta", v._meta);
 }
 
-BURAQ_NL_TYPE(AgentAuthCapabilities, logout)
-BURAQ_NL_TYPE(AgentCapabilities, loadSession, promptCapabilities, mcpCapabilities, sessionCapabilities, auth)
-BURAQ_NL_TYPE(ImplementationInfo, name, version, title)
+BURAQ_NL_TYPE(AgentAuthCapabilities, logout, _meta)
+BURAQ_NL_TYPE(AgentCapabilities, loadSession, promptCapabilities, mcpCapabilities, sessionCapabilities, auth, _meta)
+BURAQ_NL_TYPE(ImplementationInfo, name, version, title, _meta)
 
 // --- Authentication ---
-BURAQ_NL_TYPE(AuthMethodAgent, id, name, description)
-BURAQ_NL_TYPE(AuthMethodTerminal, type, id, name, description, args, env)
+BURAQ_NL_TYPE(AuthMethodAgent, id, name, description, _meta)
+BURAQ_NL_TYPE(AuthMethodTerminal, type, id, name, description, args, env, _meta)
 BURAQ_NL_TAGGED(AuthMethod)
-BURAQ_NL_TYPE(AuthenticateParams, methodId)
+BURAQ_NL_TYPE(AuthenticateParams, methodId, _meta)
 BURAQ_NL_EMPTY(AuthenticateResult)
 BURAQ_NL_EMPTY(LogoutParams)
 BURAQ_NL_EMPTY(LogoutResult)
 
 // --- initialize ---
-BURAQ_NL_TYPE(InitializeParams, protocolVersion, clientCapabilities, clientInfo)
-BURAQ_NL_TYPE(InitializeResult, protocolVersion, agentCapabilities, authMethods, agentInfo)
+BURAQ_NL_TYPE(InitializeParams, protocolVersion, clientCapabilities, clientInfo, _meta)
+BURAQ_NL_TYPE(InitializeResult, protocolVersion, agentCapabilities, authMethods, agentInfo, _meta)
 
 // --- Content Blocks ---
-BURAQ_NL_TYPE(Annotations, audience, lastModified, priority)
-BURAQ_NL_TYPE(TextContent, type, text, annotations)
-BURAQ_NL_TYPE(ImageContent, type, data, mimeType, uri, annotations)
-BURAQ_NL_TYPE(AudioContent, type, data, mimeType, annotations)
-BURAQ_NL_TYPE(ResourceLinkContent, type, uri, name, mimeType, description, title, size, annotations)
-BURAQ_NL_TYPE(EmbeddedResourcePayload, uri, mimeType, text, blob)
-BURAQ_NL_TYPE(EmbeddedResourceContent, type, resource, annotations)
+BURAQ_NL_TYPE(Annotations, audience, lastModified, priority, _meta)
+BURAQ_NL_TYPE(TextContent, type, text, annotations, _meta)
+BURAQ_NL_TYPE(ImageContent, type, data, mimeType, uri, annotations, _meta)
+BURAQ_NL_TYPE(AudioContent, type, data, mimeType, annotations, _meta)
+BURAQ_NL_TYPE(ResourceLinkContent, type, uri, name, mimeType, description, title, size, annotations, _meta)
+BURAQ_NL_TYPE(EmbeddedResourcePayload, uri, mimeType, text, blob, _meta)
+BURAQ_NL_TYPE(EmbeddedResourceContent, type, resource, annotations, _meta)
 BURAQ_NL_TAGGED(ContentBlock)
 
 // --- MCP servers ---
-BURAQ_NL_TYPE(EnvVariable, name, value)
-BURAQ_NL_TYPE(HttpHeader, name, value)
-BURAQ_NL_TYPE(McpServerHttp, type, name, url, headers)
-BURAQ_NL_TYPE(McpServerSse, type, name, url, headers)
-BURAQ_NL_TYPE(McpServerStdio, name, command, args, env)
+BURAQ_NL_TYPE(EnvVariable, name, value, _meta)
+BURAQ_NL_TYPE(HttpHeader, name, value, _meta)
+BURAQ_NL_TYPE(McpServerHttp, type, name, url, headers, _meta)
+BURAQ_NL_TYPE(McpServerSse, type, name, url, headers, _meta)
+BURAQ_NL_TYPE(McpServerStdio, name, command, args, env, _meta)
 BURAQ_NL_TAGGED(McpServer)
 
 // --- Session configuration ---
-BURAQ_NL_TYPE(SessionMode, id, name, description)
-BURAQ_NL_TYPE(SessionModeState, currentModeId, availableModes)
-BURAQ_NL_TYPE(ModelInfo, modelId, name, description)
-BURAQ_NL_TYPE(SessionModelState, currentModelId, availableModels)
-BURAQ_NL_TYPE(SessionConfigSelectOption, value, name, description)
-BURAQ_NL_TYPE(SessionConfigSelectItem, value, name, description, group, options)
-BURAQ_NL_TYPE(SessionConfigOption, id, name, description, category, type, currentValue, options)
-BURAQ_NL_TYPE(SystemPrompt, mode, content)
+BURAQ_NL_TYPE(SessionMode, id, name, description, _meta)
+BURAQ_NL_TYPE(SessionModeState, currentModeId, availableModes, _meta)
+BURAQ_NL_TYPE(ModelInfo, modelId, name, description, _meta)
+BURAQ_NL_TYPE(SessionModelState, currentModelId, availableModels, _meta)
+BURAQ_NL_TYPE(SessionConfigSelectOption, value, name, description, _meta)
+BURAQ_NL_TYPE(SessionConfigSelectItem, value, name, description, group, options, _meta)
+BURAQ_NL_TYPE(SessionConfigOption, id, name, description, category, type, currentValue, options, _meta)
+BURAQ_NL_TYPE(SystemPrompt, mode, content, _meta)
 
 // --- Sessions ---
-BURAQ_NL_TYPE(SessionNewParams, cwd, mcpServers, additionalDirectories, systemPrompt)
-BURAQ_NL_TYPE(SessionNewResult, sessionId, modes, configOptions, models)
-BURAQ_NL_TYPE(SessionLoadParams, sessionId, cwd, mcpServers, additionalDirectories, systemPrompt)
-BURAQ_NL_TYPE(SessionLoadResult, modes, configOptions, models)
-BURAQ_NL_TYPE(SessionResumeParams, sessionId, cwd, mcpServers, additionalDirectories, systemPrompt)
-BURAQ_NL_TYPE(SessionResumeResult, modes, configOptions, models)
-BURAQ_NL_TYPE(SessionListParams, cwd, cursor)
-BURAQ_NL_TYPE(SessionInfo, sessionId, cwd, additionalDirectories, title, updatedAt)
-BURAQ_NL_TYPE(SessionListResult, sessions, nextCursor)
-BURAQ_NL_TYPE(SessionDeleteParams, sessionId)
+BURAQ_NL_TYPE(SessionNewParams, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
+BURAQ_NL_TYPE(SessionNewResult, sessionId, modes, configOptions, models, _meta)
+BURAQ_NL_TYPE(SessionLoadParams, sessionId, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
+BURAQ_NL_TYPE(SessionLoadResult, modes, configOptions, models, _meta)
+BURAQ_NL_TYPE(SessionResumeParams, sessionId, cwd, mcpServers, additionalDirectories, systemPrompt, _meta)
+BURAQ_NL_TYPE(SessionResumeResult, modes, configOptions, models, _meta)
+BURAQ_NL_TYPE(SessionListParams, cwd, cursor, _meta)
+BURAQ_NL_TYPE(SessionInfo, sessionId, cwd, additionalDirectories, title, updatedAt, _meta)
+BURAQ_NL_TYPE(SessionListResult, sessions, nextCursor, _meta)
+BURAQ_NL_TYPE(SessionDeleteParams, sessionId, _meta)
 BURAQ_NL_EMPTY(SessionDeleteResult)
-BURAQ_NL_TYPE(SessionCloseParams, sessionId)
+BURAQ_NL_TYPE(SessionCloseParams, sessionId, _meta)
 BURAQ_NL_EMPTY(SessionCloseResult)
-BURAQ_NL_TYPE(SessionSetModeParams, sessionId, modeId)
+BURAQ_NL_TYPE(SessionSetModeParams, sessionId, modeId, _meta)
 BURAQ_NL_EMPTY(SessionSetModeResult)
-BURAQ_NL_TYPE(SessionSetConfigOptionParams, sessionId, configId, type, value)
-BURAQ_NL_TYPE(SessionSetConfigOptionResult, configOptions)
-BURAQ_NL_TYPE(SessionSetModelParams, sessionId, modelId)
+BURAQ_NL_TYPE(SessionSetConfigOptionParams, sessionId, configId, type, value, _meta)
+BURAQ_NL_TYPE(SessionSetConfigOptionResult, configOptions, _meta)
+BURAQ_NL_TYPE(SessionSetModelParams, sessionId, modelId, _meta)
 BURAQ_NL_EMPTY(SessionSetModelResult)
-BURAQ_NL_TYPE(SessionPromptParams, sessionId, prompt)
-BURAQ_NL_TYPE(SessionPromptResult, stopReason)
-BURAQ_NL_TYPE(SessionCancelParams, sessionId)
-BURAQ_NL_TYPE(CancelRequestParams, requestId)
+BURAQ_NL_TYPE(SessionPromptParams, sessionId, prompt, _meta)
+BURAQ_NL_TYPE(SessionPromptResult, stopReason, _meta)
+BURAQ_NL_TYPE(SessionCancelParams, sessionId, _meta)
+BURAQ_NL_TYPE(CancelRequestParams, requestId, _meta)
 
 // --- session/update ---
-BURAQ_NL_TYPE(UserMessageChunk, sessionUpdate, content, messageId)
-BURAQ_NL_TYPE(AgentMessageChunk, sessionUpdate, content, messageId)
-BURAQ_NL_TYPE(AgentThoughtChunk, sessionUpdate, content, messageId)
-BURAQ_NL_TYPE(ToolCallLocation, path, line)
-BURAQ_NL_TYPE(ToolCallContentItem, type, content)
-BURAQ_NL_TYPE(ToolCallDiffItem, type, path, oldText, newText)
-BURAQ_NL_TYPE(ToolCallTerminalItem, type, terminalId)
+BURAQ_NL_TYPE(UserMessageChunk, sessionUpdate, content, messageId, _meta)
+BURAQ_NL_TYPE(AgentMessageChunk, sessionUpdate, content, messageId, _meta)
+BURAQ_NL_TYPE(AgentThoughtChunk, sessionUpdate, content, messageId, _meta)
+BURAQ_NL_TYPE(ToolCallLocation, path, line, _meta)
+BURAQ_NL_TYPE(ToolCallContentItem, type, content, _meta)
+BURAQ_NL_TYPE(ToolCallDiffItem, type, path, oldText, newText, _meta)
+BURAQ_NL_TYPE(ToolCallTerminalItem, type, terminalId, _meta)
 BURAQ_NL_TAGGED(ToolCallContent)
-BURAQ_NL_TYPE(ToolCallUpdate, sessionUpdate, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput)
-BURAQ_NL_TYPE(ToolCallStatusUpdate, sessionUpdate, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput)
-BURAQ_NL_TYPE(PlanEntry, content, priority, status)
-BURAQ_NL_TYPE(PlanUpdate, sessionUpdate, entries)
-BURAQ_NL_TYPE(AvailableCommandInput, hint)
-BURAQ_NL_TYPE(AvailableCommand, name, description, input)
-BURAQ_NL_TYPE(AvailableCommandsUpdate, sessionUpdate, availableCommands)
-BURAQ_NL_TYPE(CurrentModeUpdate, sessionUpdate, currentModeId)
-BURAQ_NL_TYPE(ConfigOptionUpdate, sessionUpdate, configOptions)
-BURAQ_NL_TYPE(SessionInfoUpdate, sessionUpdate, title, updatedAt)
-BURAQ_NL_TYPE(Cost, amount, currency)
-BURAQ_NL_TYPE(UsageUpdate, sessionUpdate, used, size, cost)
-BURAQ_NL_TYPE(NoticeUpdate, sessionUpdate, severity, title, description)
-BURAQ_NL_TYPE(CompactionUpdate, sessionUpdate, compactionId, status, summary, error)
-BURAQ_NL_TYPE(CompactionSummaryChunk, sessionUpdate, compactionId, content)
+BURAQ_NL_TYPE(ToolCallUpdate, sessionUpdate, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput, _meta)
+BURAQ_NL_TYPE(ToolCallStatusUpdate, sessionUpdate, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput, _meta)
+BURAQ_NL_TYPE(PlanEntry, content, priority, status, _meta)
+BURAQ_NL_TYPE(PlanUpdate, sessionUpdate, entries, _meta)
+BURAQ_NL_TYPE(AvailableCommandInput, hint, _meta)
+BURAQ_NL_TYPE(AvailableCommand, name, description, input, _meta)
+BURAQ_NL_TYPE(AvailableCommandsUpdate, sessionUpdate, availableCommands, _meta)
+BURAQ_NL_TYPE(CurrentModeUpdate, sessionUpdate, currentModeId, _meta)
+BURAQ_NL_TYPE(ConfigOptionUpdate, sessionUpdate, configOptions, _meta)
+BURAQ_NL_TYPE(SessionInfoUpdate, sessionUpdate, title, updatedAt, _meta)
+BURAQ_NL_TYPE(Cost, amount, currency, _meta)
+BURAQ_NL_TYPE(UsageUpdate, sessionUpdate, used, size, cost, _meta)
+BURAQ_NL_TYPE(NoticeUpdate, sessionUpdate, severity, title, description, _meta)
+BURAQ_NL_TYPE(CompactionUpdate, sessionUpdate, compactionId, status, summary, error, _meta)
+BURAQ_NL_TYPE(CompactionSummaryChunk, sessionUpdate, compactionId, content, _meta)
 BURAQ_NL_TAGGED(SessionUpdatePayload)
-BURAQ_NL_TYPE(SessionUpdateNotification, sessionId, update)
+BURAQ_NL_TYPE(SessionUpdateNotification, sessionId, update, _meta)
 
 // --- Permissions ---
-BURAQ_NL_TYPE(PermissionOption, optionId, name, kind)
-BURAQ_NL_TYPE(PermissionToolCallInfo, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput)
-BURAQ_NL_TYPE(RequestPermissionParams, sessionId, toolCall, options)
-BURAQ_NL_TYPE(PermissionCancelledOutcome, outcome)
-BURAQ_NL_TYPE(PermissionSelectedOutcome, outcome, optionId)
+BURAQ_NL_TYPE(PermissionOption, optionId, name, kind, _meta)
+BURAQ_NL_TYPE(PermissionToolCallInfo, toolCallId, title, name, kind, status, content, locations, rawInput, rawOutput, _meta)
+BURAQ_NL_TYPE(RequestPermissionParams, sessionId, toolCall, options, _meta)
+BURAQ_NL_TYPE(PermissionCancelledOutcome, outcome, _meta)
+BURAQ_NL_TYPE(PermissionSelectedOutcome, outcome, optionId, _meta)
 BURAQ_NL_TAGGED(PermissionOutcome)
-BURAQ_NL_TYPE(RequestPermissionResult, outcome)
+BURAQ_NL_TYPE(RequestPermissionResult, outcome, _meta)
 
 // --- Elicitation ---
-BURAQ_NL_TYPE(CreateElicitationParams, mode, message, requestedSchema, elicitationId, url, sessionId, toolCallId, requestId)
-BURAQ_NL_TYPE(CreateElicitationResult, action, content)
-BURAQ_NL_TYPE(CompleteElicitationParams, elicitationId)
+BURAQ_NL_TYPE(CreateElicitationParams, mode, message, requestedSchema, elicitationId, url, sessionId, toolCallId, requestId, _meta)
+BURAQ_NL_TYPE(CreateElicitationResult, action, content, _meta)
+BURAQ_NL_TYPE(CompleteElicitationParams, elicitationId, _meta)
 
 // --- Filesystem ---
-BURAQ_NL_TYPE(FsReadTextFileParams, sessionId, path, line, limit)
-BURAQ_NL_TYPE(FsReadTextFileResult, content)
-BURAQ_NL_TYPE(FsWriteTextFileParams, sessionId, path, content)
+BURAQ_NL_TYPE(FsReadTextFileParams, sessionId, path, line, limit, _meta)
+BURAQ_NL_TYPE(FsReadTextFileResult, content, _meta)
+BURAQ_NL_TYPE(FsWriteTextFileParams, sessionId, path, content, _meta)
 BURAQ_NL_EMPTY(FsWriteTextFileResult)
 
 // --- Terminal ---
-BURAQ_NL_TYPE(TerminalCreateParams, sessionId, command, args, cwd, env, outputByteLimit)
-BURAQ_NL_TYPE(TerminalCreateResult, terminalId)
-BURAQ_NL_TYPE(TerminalOutputParams, sessionId, terminalId)
-BURAQ_NL_TYPE(TerminalExitStatus, exitCode, signal)
-BURAQ_NL_TYPE(TerminalOutputResult, output, truncated, exitStatus)
-BURAQ_NL_TYPE(TerminalWaitForExitParams, sessionId, terminalId)
-BURAQ_NL_TYPE(TerminalWaitForExitResult, exitCode, signal)
-BURAQ_NL_TYPE(TerminalKillParams, sessionId, terminalId)
+BURAQ_NL_TYPE(TerminalCreateParams, sessionId, command, args, cwd, env, outputByteLimit, _meta)
+BURAQ_NL_TYPE(TerminalCreateResult, terminalId, _meta)
+BURAQ_NL_TYPE(TerminalOutputParams, sessionId, terminalId, _meta)
+BURAQ_NL_TYPE(TerminalExitStatus, exitCode, signal, _meta)
+BURAQ_NL_TYPE(TerminalOutputResult, output, truncated, exitStatus, _meta)
+BURAQ_NL_TYPE(TerminalWaitForExitParams, sessionId, terminalId, _meta)
+BURAQ_NL_TYPE(TerminalWaitForExitResult, exitCode, signal, _meta)
+BURAQ_NL_TYPE(TerminalKillParams, sessionId, terminalId, _meta)
 BURAQ_NL_EMPTY(TerminalKillResult)
-BURAQ_NL_TYPE(TerminalReleaseParams, sessionId, terminalId)
+BURAQ_NL_TYPE(TerminalReleaseParams, sessionId, terminalId, _meta)
 BURAQ_NL_EMPTY(TerminalReleaseResult)
 
 } // namespace v1

@@ -28,6 +28,10 @@ add_library(buraq::buraq ALIAS buraq)
 
 target_compile_features(buraq INTERFACE cxx_std_20)
 
+# buraq/runtime (Connection, serve_stdio, spawn_agent) uses std::thread.
+find_package(Threads REQUIRED)
+target_link_libraries(buraq INTERFACE Threads::Threads)
+
 target_sources(buraq INTERFACE
         FILE_SET HEADERS
         BASE_DIRS include
@@ -37,8 +41,11 @@ target_sources(buraq INTERFACE
         include/buraq/protocol/jsonrpc.hpp
         include/buraq/protocol/schema_v1.hpp
         include/buraq/core/agent_base.hpp
+        include/buraq/core/async.hpp
         include/buraq/core/client_base.hpp
         include/buraq/transport/stdio.hpp
+        include/buraq/transport/process.hpp
+        include/buraq/runtime/connection.hpp
         include/buraq/codecs/glaze.hpp
         include/buraq/codecs/nlohmann.hpp
 )
@@ -118,13 +125,12 @@ if(BURAQ_BUILD_EXAMPLES)
                 $<$<CXX_COMPILER_ID:MSVC>:/W4>
         )
 
-        if(NOT WIN32)
-            add_executable(buraq_minimal_client examples/minimal_client.cpp)
-            target_link_libraries(buraq_minimal_client PRIVATE buraq::buraq glaze::glaze)
-            target_compile_options(buraq_minimal_client PRIVATE
-                    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
-            )
-        endif()
+        add_executable(buraq_minimal_client examples/minimal_client.cpp)
+        target_link_libraries(buraq_minimal_client PRIVATE buraq::buraq glaze::glaze)
+        target_compile_options(buraq_minimal_client PRIVATE
+                $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+                $<$<CXX_COMPILER_ID:MSVC>:/W4>
+        )
     else()
         message(STATUS "Skipping examples: glaze::glaze not available")
     endif()
@@ -155,6 +161,18 @@ if(BURAQ_BUILD_TESTS)
         endif()
     endif()
 
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime_test.cpp"
+            AND TARGET glaze::glaze AND TARGET nlohmann_json::nlohmann_json)
+        add_executable(buraq_runtime_test tests/runtime_test.cpp)
+        target_link_libraries(buraq_runtime_test PRIVATE
+                buraq::buraq glaze::glaze nlohmann_json::nlohmann_json)
+        if(TARGET buraq_echo_agent)
+            add_test(NAME runtime_test COMMAND buraq_runtime_test $<TARGET_FILE:buraq_echo_agent>)
+        else()
+            add_test(NAME runtime_test COMMAND buraq_runtime_test)
+        endif()
+    endif()
+
     # End-to-end: the minimal client spawns the echo agent over real stdio pipes.
     if(TARGET buraq_minimal_client AND TARGET buraq_echo_agent)
         add_test(NAME stdio_e2e_test
@@ -165,7 +183,7 @@ endif()
 
 if(BURAQ_ENABLE_COVERAGE)
     # single_include_test is not instrumented: it would only re-measure the amalgamated copy.
-    foreach(_buraq_cov_target buraq_dispatch_test buraq_echo_agent buraq_minimal_client)
+    foreach(_buraq_cov_target buraq_dispatch_test buraq_runtime_test buraq_echo_agent buraq_minimal_client)
         buraq_enable_coverage(${_buraq_cov_target})
     endforeach()
 endif()

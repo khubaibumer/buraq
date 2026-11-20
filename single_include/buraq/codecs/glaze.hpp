@@ -3,7 +3,7 @@
 // https://github.com/khubaibumer/buraq
 //
 // Single-header distribution: buraq/codecs/glaze.hpp
-// Requires buraq/acp.hpp from this single_include tree.
+// Requires buraq/acp.hpp from this single_include tree and Glaze.
 //
 // GENERATED FILE - DO NOT EDIT. Regenerate with: python3 scripts/amalgamate.py
 // SPDX-License-Identifier: Apache-2.0
@@ -17,7 +17,7 @@
 /// @brief JSON codec backed by Glaze (`buraq::GlazeCodec`).
 ///
 /// Implements the buraq::JsonCodec concept with Glaze: parses raw JSON-RPC 2.0 envelopes, decodes typed
-/// params/results while ignoring unknown keys (such as ACP `_meta`), and encodes requests, notifications,
+/// params/results while ignoring unknown keys (ACP `_meta` is preserved in each type's `_meta` member), and encodes requests, notifications,
 /// results and errors. Also registers the Glaze metadata needed for the ACP v1 schema types (tagged unions,
 /// raw JSON passthrough, renamed members).
 ///
@@ -27,6 +27,7 @@
 /// Usage: `class MyAgent : public buraq::AgentBase<MyAgent, buraq::GlazeCodec> { ... };`
 
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <map>
 #include <glaze/glaze.hpp>
@@ -37,6 +38,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 // Glaze 5 moved its reader/writer customization points from `glz::detail` to `glz`. Glaze has no version macro,
 // so detect it by `glaze/core/manage.hpp`, which first shipped in 5.0.1 (define the macro yourself for 5.0.0).
@@ -64,28 +66,11 @@
 #else
 #define BURAQ_GLZ_CUSTOMIZATION_NS glz
 #endif
-
-// Tagged-union discriminators required by ACP v1 JSON Schema (single source: buraq::v1::variant_tag)
-#define BURAQ_GLZ_TAGGED_VARIANT(VariantType)                                              \
-    template <>                                                                             \
-    struct glz::meta<VariantType> {                                                         \
-        static constexpr std::string_view tag = buraq::v1::variant_tag<VariantType>::key;  \
-        static constexpr auto ids = buraq::v1::variant_tag<VariantType>::ids;              \
-    };
-
-BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::ContentBlock)
-BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::ToolCallContent)
-BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::SessionUpdatePayload)
-BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::PermissionOutcome)
-BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::McpServer)
-BURAQ_GLZ_TAGGED_VARIANT(buraq::v1::AuthMethod)
-
-#undef BURAQ_GLZ_TAGGED_VARIANT
 /// @endcond
 
-// Unions whose default alternative carries no tag (McpServer: stdio, AuthMethod: agent). Glaze's key-based
-// deduction cannot tell them apart when the untagged alternative's keys are a subset of a tagged one, so
-// dispatch on the tag explicitly: known tag -> that alternative, missing tag -> the untagged alternative.
+// Tagged unions (discriminators from buraq::v1::variant_tag). Dispatch on the tag explicitly: known tag -> that
+// alternative, missing tag -> the untagged alternative (McpServer: stdio, AuthMethod: agent) or an error, any
+// other tag -> buraq::v1::Unknown holding the raw object (forward compatibility with newer protocol revisions).
 namespace buraq::detail {
 
 /// @brief Reads @p json into alternative @p index of @p out (compile-time recursion over alternatives).
@@ -106,18 +91,28 @@ void glz_emplace_alternative(Variant& out, std::size_t index, std::string_view j
         Alt alt{};
         ec = glz::read<glz::opts{.error_on_unknown_keys = false}>(alt, json).ec;
         if (ec == glz::error_code::none) {
+            // tag literals must not alias the temporary input buffer
             if constexpr (requires { alt.type; }) {
-                alt.type = Alt{}.type; // tag literal must not alias the temporary input buffer
+                alt.type = Alt{}.type;
+            }
+            if constexpr (requires { alt.sessionUpdate; }) {
+                alt.sessionUpdate = Alt{}.sessionUpdate;
+            }
+            if constexpr (requires { alt.outcome; }) {
+                if constexpr (std::is_same_v<decltype(alt.outcome), std::string_view>) {
+                    alt.outcome = Alt{}.outcome;
+                }
             }
             out = std::move(alt);
         }
     }
 }
 
-/// @brief Decodes a tagged union whose default alternative carries no discriminator.
+/// @brief Decodes a tagged union by its discriminator.
 ///
-/// A known tag value selects that alternative, a missing tag selects buraq::v1::variant_tag::untagged, and
-/// an unknown or non-string tag yields `glz::error_code::no_matching_variant_type`.
+/// A known tag value selects that alternative, a missing tag selects buraq::v1::variant_tag::untagged (or fails
+/// with `glz::error_code::no_matching_variant_type` when the tag is required), an unrecognized string tag yields
+/// buraq::v1::Unknown, and a non-string tag fails.
 /// @tparam Variant std::variant with a buraq::v1::variant_tag specialization.
 /// @param value Variant to fill.
 /// @param json Raw JSON object text.
@@ -130,8 +125,16 @@ void glz_read_default_tagged(Variant& value, std::string_view json, glz::error_c
     if (ec != glz::error_code::none) {
         return;
     }
+    auto it = obj.find(Tag::key);
+    if (it != obj.end() && it->second.str == "null") {
+        it = obj.end();
+    }
+    if (it == obj.end() && Tag::untagged < 0) {
+        ec = glz::error_code::no_matching_variant_type;
+        return;
+    }
     std::size_t index = static_cast<std::size_t>(Tag::untagged);
-    if (auto it = obj.find(Tag::key); it != obj.end()) {
+    if (it != obj.end()) {
         std::string tag;
         if (glz::read_json(tag, it->second.str)) {
             ec = glz::error_code::no_matching_variant_type;
@@ -144,11 +147,20 @@ void glz_read_default_tagged(Variant& value, std::string_view json, glz::error_c
             }
         }
         if (index == Tag::ids.size()) {
-            ec = glz::error_code::no_matching_variant_type;
+            value = buraq::v1::Unknown{std::move(tag), buraq::RawJson{std::string(json)}};
             return;
         }
     }
     glz_emplace_alternative(value, index, json, ec);
+}
+
+/// @brief JSON written for a buraq::v1::Unknown without raw text: `{"<key>":"<tag>"}`.
+/// @tparam Variant std::variant with a buraq::v1::variant_tag specialization.
+/// @param tag Discriminator value.
+/// @return The JSON object text.
+template <typename Variant>
+std::string glz_unknown_stub(const std::string& tag) {
+    return "{" + buraq::detail::json_quote(buraq::v1::variant_tag<Variant>::key) + ":" + buraq::detail::json_quote(tag) + "}";
 }
 
 } // namespace buraq::detail
@@ -172,7 +184,7 @@ void glz_read_default_tagged(Variant& value, std::string_view json, glz::error_c
             }                                                                                 \
         }                                                                                     \
     };                                                                                        \
-    /* Write each alternative as-is: tagged ones carry their own `type`, the default one none */ \
+    /* Write each alternative as-is (tagged ones carry their own tag); Unknown verbatim */      \
     template <>                                                                               \
     struct BURAQ_GLZ_CUSTOMIZATION_NS::to<glz::JSON, VariantType> {                           \
         template <auto Opts>                                                                  \
@@ -180,13 +192,25 @@ void glz_read_default_tagged(Variant& value, std::string_view json, glz::error_c
             std::visit(                                                                       \
                 [&](const auto& alt) {                                                        \
                     using Alt = std::decay_t<decltype(alt)>;                                  \
-                    BURAQ_GLZ_CUSTOMIZATION_NS::to<glz::JSON, Alt>::template op<Opts>(        \
-                        alt, ctx, args...);                                                   \
+                    if constexpr (std::is_same_v<Alt, buraq::v1::Unknown>) {                 \
+                        const glz::raw_json raw{alt.raw.json.empty()                         \
+                            ? buraq::detail::glz_unknown_stub<VariantType>(alt.tag)          \
+                            : alt.raw.json};                                                  \
+                        BURAQ_GLZ_CUSTOMIZATION_NS::to<glz::JSON, glz::raw_json>::template    \
+                            op<Opts>(raw, ctx, args...);                                      \
+                    } else {                                                                  \
+                        BURAQ_GLZ_CUSTOMIZATION_NS::to<glz::JSON, Alt>::template op<Opts>(    \
+                            alt, ctx, args...);                                               \
+                    }                                                                         \
                 },                                                                            \
                 value);                                                                       \
         }                                                                                     \
     };
 
+BURAQ_GLZ_DEFAULT_TAGGED_CODEC(buraq::v1::ContentBlock)
+BURAQ_GLZ_DEFAULT_TAGGED_CODEC(buraq::v1::ToolCallContent)
+BURAQ_GLZ_DEFAULT_TAGGED_CODEC(buraq::v1::SessionUpdatePayload)
+BURAQ_GLZ_DEFAULT_TAGGED_CODEC(buraq::v1::PermissionOutcome)
 BURAQ_GLZ_DEFAULT_TAGGED_CODEC(buraq::v1::McpServer)
 BURAQ_GLZ_DEFAULT_TAGGED_CODEC(buraq::v1::AuthMethod)
 
@@ -203,6 +227,16 @@ struct glz::meta<buraq::RawJson> {
     static constexpr auto value = glz::custom<read_fn, write_fn>;
 };
 
+// Unknown union alternatives are written by the union codec; standalone they read/write their raw object
+template <>
+struct glz::meta<buraq::v1::Unknown> {
+    static constexpr auto read_fn = [](buraq::v1::Unknown& self, const glz::raw_json& in) { self.raw.json = in.str; };
+    static constexpr auto write_fn = [](const buraq::v1::Unknown& self) {
+        return glz::raw_json{self.raw.json.empty() ? std::string("{}") : self.raw.json};
+    };
+    static constexpr auto value = glz::custom<read_fn, write_fn>;
+};
+
 // `delete` is a C++ keyword; the member is spelled `delete_`
 template <>
 struct glz::meta<buraq::v1::SessionCapabilities> {
@@ -212,7 +246,8 @@ struct glz::meta<buraq::v1::SessionCapabilities> {
                                               "additionalDirectories", &T::additionalDirectories,
                                               "systemPrompt", &T::systemPrompt,
                                               "resume", &T::resume,
-                                              "close", &T::close);
+                                              "close", &T::close,
+                                              "_meta", &T::_meta);
 };
 /// @endcond
 
@@ -296,6 +331,82 @@ struct GlzErrorResponseWire {
     GlzRpcErrorWire error;
 };
 
+/// @brief Returns @p json with every object member whose value is `null` removed (whitespace is dropped).
+///
+/// Used by GlazeCodec::decode as a fallback so `"field": null` is treated like an absent field (as the
+/// nlohmann/json codec and most ACP SDKs do) instead of failing on non-optional members. Malformed input
+/// yields unspecified (still malformed) output.
+/// @param json JSON text.
+/// @return The filtered JSON text.
+inline std::string glz_strip_null_members(std::string_view json) {
+    struct Frame {
+        bool object;
+        bool expect_key;
+        bool emitted;
+    };
+    std::string out;
+    out.reserve(json.size());
+    std::vector<Frame> stack;
+    const auto is_ws = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+    const auto skip_ws = [&](std::size_t i) {
+        while (i < json.size() && is_ws(json[i])) ++i;
+        return i;
+    };
+    const auto string_end = [&](std::size_t i) { // i at opening quote; returns index past closing quote
+        for (++i; i < json.size(); ++i) {
+            if (json[i] == '\\') {
+                ++i;
+            } else if (json[i] == '"') {
+                return i + 1;
+            }
+        }
+        return json.size();
+    };
+    std::size_t i = 0;
+    while (i < json.size()) {
+        const char c = json[i];
+        if (is_ws(c)) {
+            ++i;
+        } else if (c == '"') {
+            const std::size_t end = string_end(i);
+            if (!stack.empty() && stack.back().object && stack.back().expect_key) {
+                std::size_t v = skip_ws(end);
+                if (v < json.size() && json[v] == ':') v = skip_ws(v + 1);
+                const bool is_null = json.substr(v, 4) == "null" &&
+                                     (v + 4 >= json.size() || !std::isalnum(static_cast<unsigned char>(json[v + 4])));
+                stack.back().expect_key = false;
+                if (is_null) {
+                    i = v + 4;
+                    continue;
+                }
+                if (stack.back().emitted) out += ',';
+                stack.back().emitted = true;
+                out.append(json.substr(i, end - i));
+                out += ':';
+                i = v;
+            } else {
+                out.append(json.substr(i, end - i));
+                i = end;
+            }
+        } else if (c == '{' || c == '[') {
+            stack.push_back(Frame{c == '{', true, false});
+            out += c;
+            ++i;
+        } else if (c == '}' || c == ']') {
+            if (!stack.empty()) stack.pop_back();
+            out += c;
+            ++i;
+        } else if (c == ',' && !stack.empty() && stack.back().object) {
+            stack.back().expect_key = true;
+            ++i;
+        } else {
+            out += c;
+            ++i;
+        }
+    }
+    return out;
+}
+
 } // namespace detail
 
 /// @brief buraq::JsonCodec implementation backed by Glaze.
@@ -304,7 +415,7 @@ struct GlzErrorResponseWire {
 struct GlazeCodec {
     /// Glaze write options: omit null (empty optional) members.
     static constexpr glz::opts kWriteOpts{.skip_null_members = true};
-    /// Glaze read options: ignore unknown keys such as ACP `_meta`.
+    /// Glaze read options: ignore unknown keys.
     static constexpr glz::opts kReadOpts{.error_on_unknown_keys = false};
 
     /// @brief Parses the top-level JSON-RPC 2.0 envelope of one frame without decoding the payload.
@@ -348,6 +459,8 @@ struct GlazeCodec {
     /// @brief Decodes a typed params/result payload.
     /// @tparam T Target type.
     /// @param json Raw JSON text; empty text yields `T{}` when T is default-constructible.
+    /// Object members whose value is `null` are treated as absent (they would otherwise fail on non-optional
+    /// members).
     /// @return The decoded value, or RpcError::invalid_params() on empty input (non-default-constructible T) or
     /// a Glaze read error.
     template <typename T>
@@ -361,6 +474,14 @@ struct GlazeCodec {
 
         T value{};
         if (auto ec = glz::read<kReadOpts>(value, json); ec) {
+            // Treat `"member": null` like an absent member (retry only on failure: keeps the fast path exact)
+            if (json.find("null") != std::string_view::npos) {
+                const std::string lenient = detail::glz_strip_null_members(json);
+                T retry{};
+                if (!glz::read<kReadOpts>(retry, lenient)) {
+                    return retry;
+                }
+            }
             return unexpected(RpcError::invalid_params(glz::format_error(ec, json)));
         }
         return value;

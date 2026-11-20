@@ -8,6 +8,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <type_traits>
+#include "buraq/core/async.hpp"
 #include "buraq/detail/compat.hpp"
 #include "buraq/protocol/jsonrpc.hpp"
 #include "buraq/protocol/schema_v1.hpp"
@@ -61,8 +63,18 @@ namespace buraq {
 /// - `void on_session_cancel(const v1::SessionCancelParams&)` -- `session/cancel`
 /// - `void on_cancel_request(const v1::CancelRequestParams&)` -- `$/cancel_request`
 /// - `void on_ext_notification(std::string_view method, const RawJson& params)` -- any `_`-prefixed notification
-/// - `void on_raw_response(const RawEnvelope&)` -- responses to agent-initiated requests (request_permission(),
-///   request_fs_read(), ...)
+/// - `void on_raw_response(const RawEnvelope&)` -- responses to agent-initiated requests sent with the raw
+///   (untyped) helpers; typed requests complete their callback / future instead.
+///
+/// Deferred replies: every request hook may instead take a `Responder<Result>` by value and return `void`, e.g.
+/// `void on_session_prompt(const v1::SessionPromptParams&, Responder<v1::SessionPromptResult>)`. The reply is then
+/// sent whenever the responder is completed (from any thread); see Responder. An exception escaping any hook is
+/// answered with `-32603` instead of propagating out of feed().
+///
+/// Agent -> Client requests (request_permission(), read_text_file(), write_text_file(), create_terminal(), ...,
+/// send_request()) take a completion token: a callback `cb(expected<Result, RpcError>)` or buraq::use_future.
+/// buraq::runtime::Connection / buraq::runtime::serve_stdio() run the I/O on their own threads, so hooks may
+/// simply block on `use_future` replies.
 ///
 /// @code
 /// class EchoAgent : public buraq::AgentBase<EchoAgent, buraq::GlazeCodec> {
@@ -91,7 +103,7 @@ namespace buraq {
 ///
 /// int main() {
 ///     EchoAgent agent;
-///     return buraq::transport::run_stdio_agent(agent);
+///     return buraq::runtime::serve_stdio(agent); // or the single-threaded transport::run_stdio_agent(agent)
 /// }
 /// @endcode
 ///
@@ -101,6 +113,10 @@ namespace buraq {
 /// @see ClientBase
 template <typename Derived, JsonCodec Codec>
 class AgentBase {
+public:
+    /// JSON codec this agent encodes and decodes with.
+    using codec_type = Codec;
+
 protected:
     /// Returns `*this` downcast to the derived agent type.
     /// @return Mutable reference to the `Derived` object.
@@ -373,9 +389,110 @@ public:
         emit_bytes(Codec::encode_request(id, method, params), std::forward<OutboundSink>(sink));
     }
 
+    // --- Typed Delegated Client Requests (automatic ids, decoded replies) ---
+    // Pass a callback `cb(expected<Result, RpcError>)` (returns the request id) or buraq::use_future
+    // (returns std::future<expected<Result, RpcError>>; block on it only from a thread that is not feeding frames).
+
+    /// Asks the client for permission to run a tool call and decodes the reply.
+    /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message.
+    /// @tparam Token Callback `cb(expected<v1::RequestPermissionResult, RpcError>)` or buraq::use_future.
+    /// @param params Session, tool call and permission options.
+    /// @param sink   Outbound byte sink.
+    /// @param token  Completion callback or buraq::use_future.
+    /// @return The request id (callback) or a `std::future` of the outcome (buraq::use_future).
+    template <typename OutboundSink, typename Token>
+    auto request_permission(const v1::RequestPermissionParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::RequestPermissionResult>("session/request_permission", params, sink,
+                                                       std::forward<Token>(token));
+    }
+
+    /// Asks the client to read a text file and decodes the reply (see request_permission(params, sink, token)).
+    /// @note Only valid if client_can_read_text_file().
+    template <typename OutboundSink, typename Token>
+    auto request_fs_read(const v1::FsReadTextFileParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::FsReadTextFileResult>("fs/read_text_file", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to write a text file and decodes the reply (see request_permission(params, sink, token)).
+    /// @note Only valid if client_can_write_text_file().
+    template <typename OutboundSink, typename Token>
+    auto request_fs_write(const v1::FsWriteTextFileParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::FsWriteTextFileResult>("fs/write_text_file", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to start a command in a new terminal (see request_permission(params, sink, token)).
+    /// @note Only valid if client_supports_terminal().
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_create(const v1::TerminalCreateParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::TerminalCreateResult>("terminal/create", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client for a terminal's current output (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_output(const v1::TerminalOutputParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::TerminalOutputResult>("terminal/output", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to wait for a terminal's command to exit (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_wait_for_exit(const v1::TerminalWaitForExitParams& params, OutboundSink&& sink,
+                                        Token&& token) {
+        return send_typed<v1::TerminalWaitForExitResult>("terminal/wait_for_exit", params, sink,
+                                                         std::forward<Token>(token));
+    }
+
+    /// Asks the client to kill a terminal's command (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_kill(const v1::TerminalKillParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::TerminalKillResult>("terminal/kill", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to release a terminal (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_release(const v1::TerminalReleaseParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::TerminalReleaseResult>("terminal/release", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to collect structured input from the user (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_elicitation(const v1::CreateElicitationParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::CreateElicitationResult>("elicitation/create", params, sink,
+                                                       std::forward<Token>(token));
+    }
+
+    /// Sends a custom `_`-prefixed extension request and delivers the raw JSON result.
+    /// @param method Extension method name.
+    /// @param params Raw JSON parameters.
+    /// @param sink   Outbound byte sink.
+    /// @param token  Callback `cb(expected<RawJson, RpcError>)` or buraq::use_future.
+    template <typename OutboundSink, typename Token>
+    auto request_ext_method(std::string_view method, const RawJson& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<RawJson>(method, params, sink, std::forward<Token>(token));
+    }
+
+    /// Sends any request (e.g. an unstable method this SDK does not model yet) and decodes the reply as @p Result.
+    /// @tparam Result Result type to decode.
+    /// @param method JSON-RPC method name.
+    /// @param params Parameters (any type the codec can encode).
+    /// @param sink   Outbound byte sink.
+    /// @param token  Callback `cb(expected<Result, RpcError>)` or buraq::use_future.
+    template <typename Result, typename Params, typename OutboundSink, typename Token>
+    auto send_request(std::string_view method, const Params& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<Result>(method, params, sink, std::forward<Token>(token));
+    }
+
+    /// Returns the number of typed agent -> client requests still awaiting a reply.
+    [[nodiscard]] std::size_t pending_count() const { return pending_.size(); }
+
+    /// Fails and clears every in-flight typed request (useful on transport disconnect).
+    /// @param reason Error delivered to every pending continuation; defaults to `-32800` (Request cancelled).
+    void cancel_all_pending(const RpcError& reason = RpcError::request_cancelled()) { pending_.cancel_all(reason); }
+
 private:
     /// Set when `on_initialize` succeeds; gates all other requests when `Derived` implements `on_initialize`.
-    bool initialized_{false};
+    detail::AtomicFlag initialized_{};
+    /// Typed agent -> client requests awaiting a reply.
+    detail::PendingRequests pending_{};
     /// Client capabilities from the last successful `initialize`.
     std::optional<v1::ClientCapabilities> client_capabilities_{};
     /// Client implementation info from the last successful `initialize`.
@@ -390,6 +507,9 @@ private:
     template <typename OutboundSink>
     expected<void, RpcError> dispatch_message(const RawEnvelope& env, OutboundSink&& sink) {
         if (env.is_response()) {
+            if (pending_.complete(env)) {
+                return {};
+            }
             if constexpr (requires(Derived& d, const RawEnvelope& r) { d.on_raw_response(r); }) {
                 self().on_raw_response(env);
             }
@@ -402,7 +522,7 @@ private:
                     env, sink, [this](Derived& d, const v1::InitializeParams& p, OutboundSink&) {
                         client_capabilities_ = p.clientCapabilities;
                         client_info_ = p.clientInfo;
-                        auto result = d.on_initialize(p);
+                        auto result = detail::invoke_guarded([&] { return d.on_initialize(p); });
                         initialized_ = result.has_value();
                         if (!result) {
                             client_capabilities_.reset();
@@ -425,86 +545,46 @@ private:
             }
         }
 
-        if (env.method == "authenticate") {
-            if constexpr (requires(Derived& d, const v1::AuthenticateParams& p) { d.on_authenticate(p); }) {
-                return handle_request<v1::AuthenticateParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_authenticate(p); });
-            }
-        }
+// Routes a request to `Derived::HOOK`, preferring the deferred form `void HOOK(const PARAMS&, Responder<RESULT>)`
+// over the synchronous form `expected<RESULT, RpcError> HOOK(const PARAMS&)`.
+#define BURAQ_AGENT_ROUTE(NAME, HOOK, PARAMS, RESULT)                                                            \
+    if (env.method == NAME) {                                                                                  \
+        if constexpr (requires(Derived& d, const PARAMS& p, Responder<RESULT> r) {                             \
+                          { d.HOOK(p, std::move(r)) } -> std::same_as<void>;                                    \
+                      }) {                                                                                     \
+            return handle_deferred<PARAMS, RESULT>(                                                            \
+                env, sink, [](Derived& d, const PARAMS& p, Responder<RESULT> r) { d.HOOK(p, std::move(r)); }); \
+        } else if constexpr (requires(Derived& d, const PARAMS& p) { d.HOOK(p); }) {                           \
+            return handle_request<PARAMS>(env, sink, [](Derived& d, const PARAMS& p, auto&) { return d.HOOK(p); }); \
+        }                                                                                                      \
+    }
 
-        if (env.method == "logout") {
-            if constexpr (requires(Derived& d, const v1::LogoutParams& p) { d.on_logout(p); }) {
-                return handle_request<v1::LogoutParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_logout(p); });
-            }
-        }
+        BURAQ_AGENT_ROUTE("authenticate", on_authenticate, v1::AuthenticateParams, v1::AuthenticateResult)
+        BURAQ_AGENT_ROUTE("logout", on_logout, v1::LogoutParams, v1::LogoutResult)
+        BURAQ_AGENT_ROUTE("session/new", on_session_new, v1::SessionNewParams, v1::SessionNewResult)
+        BURAQ_AGENT_ROUTE("session/load", on_session_load, v1::SessionLoadParams, v1::SessionLoadResult)
+        BURAQ_AGENT_ROUTE("session/resume", on_session_resume, v1::SessionResumeParams, v1::SessionResumeResult)
+        BURAQ_AGENT_ROUTE("session/list", on_session_list, v1::SessionListParams, v1::SessionListResult)
+        BURAQ_AGENT_ROUTE("session/delete", on_session_delete, v1::SessionDeleteParams, v1::SessionDeleteResult)
+        BURAQ_AGENT_ROUTE("session/close", on_session_close, v1::SessionCloseParams, v1::SessionCloseResult)
+        BURAQ_AGENT_ROUTE("session/set_mode", on_session_set_mode, v1::SessionSetModeParams, v1::SessionSetModeResult)
+        BURAQ_AGENT_ROUTE("session/set_config_option", on_session_set_config_option, v1::SessionSetConfigOptionParams,
+                          v1::SessionSetConfigOptionResult)
+        BURAQ_AGENT_ROUTE("session/set_model", on_session_set_model, v1::SessionSetModelParams,
+                          v1::SessionSetModelResult)
 
-        if (env.method == "session/new") {
-            if constexpr (requires(Derived& d, const v1::SessionNewParams& p) { d.on_session_new(p); }) {
-                return handle_request<v1::SessionNewParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_new(p); });
-            }
-        }
-
-        if (env.method == "session/load") {
-            if constexpr (requires(Derived& d, const v1::SessionLoadParams& p) { d.on_session_load(p); }) {
-                return handle_request<v1::SessionLoadParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_load(p); });
-            }
-        }
-
-        if (env.method == "session/resume") {
-            if constexpr (requires(Derived& d, const v1::SessionResumeParams& p) { d.on_session_resume(p); }) {
-                return handle_request<v1::SessionResumeParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_resume(p); });
-            }
-        }
-
-        if (env.method == "session/list") {
-            if constexpr (requires(Derived& d, const v1::SessionListParams& p) { d.on_session_list(p); }) {
-                return handle_request<v1::SessionListParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_list(p); });
-            }
-        }
-
-        if (env.method == "session/delete") {
-            if constexpr (requires(Derived& d, const v1::SessionDeleteParams& p) { d.on_session_delete(p); }) {
-                return handle_request<v1::SessionDeleteParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_delete(p); });
-            }
-        }
-
-        if (env.method == "session/close") {
-            if constexpr (requires(Derived& d, const v1::SessionCloseParams& p) { d.on_session_close(p); }) {
-                return handle_request<v1::SessionCloseParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_close(p); });
-            }
-        }
-
-        if (env.method == "session/set_mode") {
-            if constexpr (requires(Derived& d, const v1::SessionSetModeParams& p) { d.on_session_set_mode(p); }) {
-                return handle_request<v1::SessionSetModeParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_set_mode(p); });
-            }
-        }
-
-        if (env.method == "session/set_config_option") {
-            if constexpr (requires(Derived& d, const v1::SessionSetConfigOptionParams& p) {
-                d.on_session_set_config_option(p);
-            }) {
-                return handle_request<v1::SessionSetConfigOptionParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_set_config_option(p); });
-            }
-        }
-
-        if (env.method == "session/set_model") {
-            if constexpr (requires(Derived& d, const v1::SessionSetModelParams& p) { d.on_session_set_model(p); }) {
-                return handle_request<v1::SessionSetModelParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_set_model(p); });
-            }
-        }
+#undef BURAQ_AGENT_ROUTE
 
         if (env.method == "session/prompt") {
+            if constexpr (requires(Derived& d, const v1::SessionPromptParams& p,
+                                   Responder<v1::SessionPromptResult> r) {
+                { d.on_session_prompt(p, std::move(r)) } -> std::same_as<void>;
+            }) {
+                return handle_deferred<v1::SessionPromptParams, v1::SessionPromptResult>(
+                    env, sink, [](Derived& d, const v1::SessionPromptParams& p, Responder<v1::SessionPromptResult> r) {
+                        d.on_session_prompt(p, std::move(r));
+                    });
+            }
 #if BURAQ_HAS_STD_GENERATOR
             if constexpr (requires(Derived& d, const v1::SessionPromptParams& p) {
                 { d.on_session_prompt_stream(p) } -> std::same_as<generator<v1::SessionUpdatePayload>>;
@@ -573,10 +653,18 @@ private:
     expected<void, RpcError> dispatch_extension(const RawEnvelope& env, OutboundSink& sink) {
         const RawJson params{std::string(env.params_json)};
         if (env.id.has_value()) {
-            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
+            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p, Responder<RawJson> r) {
+                { d.on_ext_method(m, p, std::move(r)) } -> std::same_as<void>;
+            }) {
+                std::string method{env.method};
+                detail::invoke_deferred(make_responder<RawJson>(*env.id, sink), [&](Responder<RawJson>& r) {
+                    self().on_ext_method(method, params, r);
+                });
+                return {};
+            } else if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
                 { d.on_ext_method(m, p) } -> std::same_as<expected<RawJson, RpcError>>;
             }) {
-                auto result = self().on_ext_method(env.method, params);
+                auto result = detail::invoke_guarded([&] { return self().on_ext_method(env.method, params); });
                 if (!result) {
                     emit_bytes(Codec::encode_error(*env.id, result.error()), sink);
                 } else {
@@ -619,13 +707,64 @@ private:
             return {};
         }
 
-        auto result = handler(self(), *params, sink);
+        auto result = detail::invoke_guarded([&] { return handler(self(), *params, sink); });
         if (!result) {
             emit_bytes(Codec::encode_error(*env.id, result.error()), sink);
         } else {
             emit_bytes(Codec::encode_result(*env.id, *result), sink);
         }
         return {};
+    }
+
+    /// Binds a Responder to request @p id, copying @p sink into it.
+    /// @tparam Result Result type of the request.
+    /// @tparam OutboundSink Copy-constructible sink type.
+    template <typename Result, typename OutboundSink>
+    static Responder<Result> make_responder(const RequestId& id, OutboundSink& sink) {
+        static_assert(std::is_copy_constructible_v<std::remove_cvref_t<OutboundSink>>,
+                      "Deferred (Responder) handlers keep a copy of the outbound sink: it must be copy-constructible "
+                      "(wrap stateful sinks with std::ref or use a shared handle)");
+        return Responder<Result>::template create<Codec>(id, OutboundFn(sink));
+    }
+
+    /// Decodes and validates a request, then hands a Responder to a deferred hook.
+    /// Decode and validation failures are answered immediately; otherwise the reply is sent whenever the hook
+    /// (or a copy of its Responder) completes it. An exception escaping the hook fails the request with `-32603`.
+    /// @tparam Params  Parameter type to decode from `params`.
+    /// @tparam Result  Result type of the request.
+    /// @tparam OutboundSink Copy-constructible sink type.
+    /// @tparam Handler Callable `(Derived&, const Params&, Responder<Result>) -> void`.
+    /// @param env     Parsed inbound request envelope.
+    /// @param sink    Outbound byte sink (copied into the Responder).
+    /// @param handler Invokes the `Derived` hook.
+    /// @return Empty on success; `-32600` (Invalid Request) if the envelope has no `id`.
+    template <typename Params, typename Result, typename OutboundSink, typename Handler>
+    expected<void, RpcError> handle_deferred(const RawEnvelope& env, OutboundSink& sink, Handler&& handler) {
+        if (!env.id.has_value()) {
+            return unexpected(RpcError::invalid_request("Expected request id for " + std::string(env.method)));
+        }
+
+        auto params = Codec::template decode<Params>(env.params_json);
+        if (!params) {
+            emit_bytes(Codec::encode_error(*env.id, params.error()), sink);
+            return {};
+        }
+        if (auto reason = v1::validate(*params)) {
+            emit_bytes(Codec::encode_error(*env.id, RpcError::invalid_params(*reason)), sink);
+            return {};
+        }
+
+        detail::invoke_deferred(make_responder<Result>(*env.id, sink),
+                                [&](Responder<Result>& r) { handler(self(), *params, r); });
+        return {};
+    }
+
+    /// Allocates an id, registers a typed continuation and emits an agent -> client request.
+    template <typename Result, typename Params, typename OutboundSink, typename Token>
+    auto send_typed(std::string_view method, const Params& params, OutboundSink& sink, Token&& token) {
+        return detail::send_typed_request<Result, Codec>(
+            pending_, std::forward<Token>(token), detail::ignore_value{},
+            [&](const RequestId& id) { emit_bytes(Codec::encode_request(id, method, params), sink); });
     }
 };
 

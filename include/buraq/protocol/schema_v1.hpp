@@ -25,11 +25,27 @@ namespace buraq::v1 {
 /// ACP protocol version implemented by this SDK (sent/expected in `initialize`).
 inline constexpr std::uint32_t kProtocolVersion = 1;
 
+/// Alternative of every tagged union holding a variant this SDK does not know (yet).
+///
+/// Produced when decoding a discriminator value introduced by a newer protocol revision or a custom
+/// extension, so peers keep working instead of rejecting the whole message. `raw` holds the complete
+/// JSON object and is written back verbatim when encoded.
+struct Unknown {
+    /// Discriminator value found on the wire (e.g. the unrecognized `sessionUpdate` kind).
+    std::string tag{};
+    /// The complete JSON object, as received.
+    RawJson raw{};
+    /// Lexicographic comparison of the tag and raw text.
+    auto operator<=>(const Unknown&) const = default;
+};
+
 // Presence-only capability object (`{}` on the wire means "supported")
 /// Presence-only capability object.
 ///
 /// Serialized as `{}`; its presence (in an `std::optional`) means the capability is supported.
 struct CapabilityMarker {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CapabilityMarker&) const = default;
 };
@@ -41,6 +57,8 @@ struct FileSystemCapabilities {
     bool readTextFile{false};
     /// Client supports `fs/write_text_file`. Defaults to `false`.
     bool writeTextFile{false};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FileSystemCapabilities&) const = default;
 };
@@ -49,6 +67,8 @@ struct FileSystemCapabilities {
 struct SessionConfigOptionsCapabilities {
     /// Present when the client supports `boolean` config options; optional.
     std::optional<CapabilityMarker> boolean{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionConfigOptionsCapabilities&) const = default;
 };
@@ -61,6 +81,8 @@ struct ClientSessionCapabilities {
     std::optional<SessionConfigOptionsCapabilities> configOptions{};
     /// Present when the client supports `notice` session updates; optional.
     std::optional<CapabilityMarker> notices{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ClientSessionCapabilities&) const = default;
 };
@@ -69,6 +91,8 @@ struct ClientSessionCapabilities {
 struct ClientAuthCapabilities {
     /// Client supports terminal-based authentication methods. Defaults to `false`.
     bool terminal{false};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ClientAuthCapabilities&) const = default;
 };
@@ -79,6 +103,8 @@ struct ElicitationCapabilities {
     std::optional<CapabilityMarker> form{};
     /// Present when the client supports URL-mode elicitation; optional.
     std::optional<CapabilityMarker> url{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ElicitationCapabilities&) const = default;
 };
@@ -97,6 +123,8 @@ struct ClientCapabilities {
     std::optional<ClientAuthCapabilities> auth{};
     /// Supported elicitation modes; optional (absent means no elicitation).
     std::optional<ElicitationCapabilities> elicitation{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ClientCapabilities&) const = default;
 };
@@ -111,6 +139,8 @@ struct PromptCapabilities {
     bool audio{false};
     /// Agent accepts embedded resources in prompts. Defaults to `false`.
     bool embeddedContext{false};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PromptCapabilities&) const = default;
 };
@@ -123,6 +153,8 @@ struct McpCapabilities {
     bool http{false};
     /// Agent can connect to SSE MCP servers. Defaults to `false`.
     bool sse{false};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const McpCapabilities&) const = default;
 };
@@ -131,6 +163,8 @@ struct McpCapabilities {
 struct SystemPromptModeCapabilities {
     /// Present when the agent supports `mode: "override"`; optional.
     std::optional<CapabilityMarker> override{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SystemPromptModeCapabilities&) const = default;
 };
@@ -139,6 +173,8 @@ struct SystemPromptModeCapabilities {
 struct SystemPromptCapabilities {
     /// Supported system-prompt modes; optional.
     std::optional<SystemPromptModeCapabilities> mode{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SystemPromptCapabilities&) const = default;
 };
@@ -160,6 +196,8 @@ struct SessionCapabilities {
     std::optional<CapabilityMarker> resume{};
     /// Present when the agent supports `session/close`; optional.
     std::optional<CapabilityMarker> close{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionCapabilities&) const = default;
 };
@@ -168,6 +206,8 @@ struct SessionCapabilities {
 struct AgentAuthCapabilities {
     /// Present when the agent supports `logout`; optional.
     std::optional<CapabilityMarker> logout{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AgentAuthCapabilities&) const = default;
 };
@@ -186,6 +226,8 @@ struct AgentCapabilities {
     std::optional<SessionCapabilities> sessionCapabilities{};
     /// Authentication capabilities; optional.
     std::optional<AgentAuthCapabilities> auth{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AgentCapabilities&) const = default;
 };
@@ -198,6 +240,8 @@ struct ImplementationInfo {
     std::string version;
     /// Optional human-readable display name.
     std::optional<std::string> title{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ImplementationInfo&) const = default;
 };
@@ -213,6 +257,8 @@ struct AuthMethodAgent {
     std::string name;
     /// Optional description of the method.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AuthMethodAgent&) const = default;
 };
@@ -233,6 +279,8 @@ struct AuthMethodTerminal {
     std::optional<std::vector<std::string>> args{};
     /// Optional extra environment variables for the terminal login flow.
     std::optional<std::map<std::string, std::string>> env{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AuthMethodTerminal&) const = default;
 };
@@ -242,31 +290,40 @@ struct AuthMethodTerminal {
 /// Discriminated by `type`; see @ref variant_tag<AuthMethod>.
 using AuthMethod = std::variant<
     AuthMethodAgent,
-    AuthMethodTerminal
+    AuthMethodTerminal,
+    Unknown
 >;
 
 /// Parameters of the `authenticate` request.
 struct AuthenticateParams {
     /// Identifier of an auth method advertised in the `initialize` result; required.
     std::string methodId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AuthenticateParams&) const = default;
 };
 
 /// Result of the `authenticate` request (empty object).
 struct AuthenticateResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AuthenticateResult&) const = default;
 };
 
 /// Parameters of the `logout` request (empty object).
 struct LogoutParams {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const LogoutParams&) const = default;
 };
 
 /// Result of the `logout` request (empty object).
 struct LogoutResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const LogoutResult&) const = default;
 };
@@ -280,6 +337,8 @@ struct InitializeParams {
     ClientCapabilities clientCapabilities{};
     /// Optional information about the client implementation.
     std::optional<ImplementationInfo> clientInfo{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const InitializeParams&) const = default;
 };
@@ -294,6 +353,8 @@ struct InitializeResult {
     std::vector<AuthMethod> authMethods{};
     /// Optional information about the agent implementation.
     std::optional<ImplementationInfo> agentInfo{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const InitializeResult&) const = default;
 };
@@ -307,6 +368,8 @@ struct Annotations {
     std::optional<std::string> lastModified{};
     /// Optional importance, from 0 (least) to 1 (most).
     std::optional<double> priority{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const Annotations&) const = default;
 };
@@ -319,6 +382,8 @@ struct TextContent {
     std::string text;
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TextContent&) const = default;
 };
@@ -337,6 +402,8 @@ struct ImageContent {
     std::optional<std::string> uri{};
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ImageContent&) const = default;
 };
@@ -353,6 +420,8 @@ struct AudioContent {
     std::string mimeType; // e.g., "audio/wav"
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AudioContent&) const = default;
 };
@@ -375,6 +444,8 @@ struct ResourceLinkContent {
     std::optional<std::int64_t> size{};
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ResourceLinkContent&) const = default;
 };
@@ -392,6 +463,8 @@ struct EmbeddedResourcePayload {
     std::optional<std::string> text{};
     /// Base64-encoded binary contents; set for binary resources.
     std::optional<std::string> blob{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const EmbeddedResourcePayload&) const = default;
 };
@@ -406,6 +479,8 @@ struct EmbeddedResourceContent {
     EmbeddedResourcePayload resource;
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const EmbeddedResourceContent&) const = default;
 };
@@ -418,7 +493,8 @@ using ContentBlock = std::variant<
     ImageContent,
     AudioContent,
     ResourceLinkContent,
-    EmbeddedResourceContent
+    EmbeddedResourceContent,
+    Unknown
 >;
 
 // --- MCP servers (tagged union discriminated by "type"; untagged = stdio) ---
@@ -428,6 +504,8 @@ struct EnvVariable {
     std::string name;
     /// Variable value.
     std::string value;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const EnvVariable&) const = default;
 };
@@ -438,6 +516,8 @@ struct HttpHeader {
     std::string name;
     /// Header value.
     std::string value;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const HttpHeader&) const = default;
 };
@@ -454,6 +534,8 @@ struct McpServerHttp {
     std::string url;
     /// HTTP headers to send with each request; may be empty.
     std::vector<HttpHeader> headers{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const McpServerHttp&) const = default;
 };
@@ -470,6 +552,8 @@ struct McpServerSse {
     std::string url;
     /// HTTP headers to send with each request; may be empty.
     std::vector<HttpHeader> headers{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const McpServerSse&) const = default;
 };
@@ -486,6 +570,8 @@ struct McpServerStdio {
     std::vector<std::string> args{};
     /// Environment variables to set; may be empty.
     std::vector<EnvVariable> env{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const McpServerStdio&) const = default;
 };
@@ -496,7 +582,8 @@ struct McpServerStdio {
 using McpServer = std::variant<
     McpServerHttp,
     McpServerSse,
-    McpServerStdio
+    McpServerStdio,
+    Unknown
 >;
 
 // --- Session configuration ---
@@ -508,6 +595,8 @@ struct SessionMode {
     std::string name;
     /// Optional description of the mode.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionMode&) const = default;
 };
@@ -518,6 +607,8 @@ struct SessionModeState {
     std::string currentModeId;
     /// Modes the session can switch to.
     std::vector<SessionMode> availableModes{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionModeState&) const = default;
 };
@@ -533,6 +624,8 @@ struct ModelInfo {
     std::string name;
     /// Optional description of the model.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ModelInfo&) const = default;
 };
@@ -546,6 +639,8 @@ struct SessionModelState {
     std::string currentModelId;
     /// Models the session can switch to.
     std::vector<ModelInfo> availableModels{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionModelState&) const = default;
 };
@@ -562,6 +657,8 @@ struct SessionConfigSelectOption {
     std::string name;
     /// Optional description of the value.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionConfigSelectOption&) const = default;
 };
@@ -585,6 +682,8 @@ struct SessionConfigSelectItem {
     /// Whether this entry is a group rather than a single option.
     /// @return `true` when `group` is set.
     [[nodiscard]] bool is_group() const noexcept { return group.has_value(); }
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionConfigSelectItem&) const = default;
 };
@@ -605,6 +704,8 @@ struct SessionConfigOption {
     SessionConfigValue currentValue{std::string{}};
     /// Selectable values; present for `select` options.
     std::optional<std::vector<SessionConfigSelectItem>> options{}; // present for "select"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionConfigOption&) const = default;
 };
@@ -617,6 +718,8 @@ struct SystemPrompt {
     std::string mode{"append"}; // "append", "override"
     /// System prompt content blocks.
     std::vector<ContentBlock> content{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SystemPrompt&) const = default;
 };
@@ -632,6 +735,8 @@ struct SessionNewParams {
     std::optional<std::vector<std::string>> additionalDirectories{};
     /// Optional client-supplied system prompt.
     std::optional<SystemPrompt> systemPrompt{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionNewParams&) const = default;
 };
@@ -647,6 +752,8 @@ struct SessionNewResult {
     /// Optional session model state.
     /// @note Unstable in ACP: not part of the stable ACP v1 schema.
     std::optional<SessionModelState> models{}; // UNSTABLE
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionNewResult&) const = default;
 };
@@ -665,6 +772,8 @@ struct SessionLoadParams {
     std::optional<std::vector<std::string>> additionalDirectories{};
     /// Optional client-supplied system prompt.
     std::optional<SystemPrompt> systemPrompt{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionLoadParams&) const = default;
 };
@@ -678,6 +787,8 @@ struct SessionLoadResult {
     /// Optional session model state.
     /// @note Unstable in ACP: not part of the stable ACP v1 schema.
     std::optional<SessionModelState> models{}; // UNSTABLE
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionLoadResult&) const = default;
 };
@@ -696,6 +807,8 @@ struct SessionResumeParams {
     std::optional<std::vector<std::string>> additionalDirectories{};
     /// Optional client-supplied system prompt.
     std::optional<SystemPrompt> systemPrompt{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionResumeParams&) const = default;
 };
@@ -709,6 +822,8 @@ struct SessionResumeResult {
     /// Optional session model state.
     /// @note Unstable in ACP: not part of the stable ACP v1 schema.
     std::optional<SessionModelState> models{}; // UNSTABLE
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionResumeResult&) const = default;
 };
@@ -721,6 +836,8 @@ struct SessionListParams {
     std::optional<std::string> cwd{};
     /// Optional opaque pagination cursor from a previous `nextCursor`.
     std::optional<std::string> cursor{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionListParams&) const = default;
 };
@@ -737,6 +854,8 @@ struct SessionInfo {
     std::optional<std::string> title{};
     /// Optional last-activity timestamp (ISO 8601).
     std::optional<std::string> updatedAt{}; // ISO 8601
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionInfo&) const = default;
 };
@@ -747,6 +866,8 @@ struct SessionListResult {
     std::vector<SessionInfo> sessions{};
     /// Cursor for the next page; absent when there are no more results.
     std::optional<std::string> nextCursor{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionListResult&) const = default;
 };
@@ -757,12 +878,16 @@ struct SessionListResult {
 struct SessionDeleteParams {
     /// Identifier of the session to delete.
     std::string sessionId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionDeleteParams&) const = default;
 };
 
 /// Result of the `session/delete` request (empty object).
 struct SessionDeleteResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionDeleteResult&) const = default;
 };
@@ -773,12 +898,16 @@ struct SessionDeleteResult {
 struct SessionCloseParams {
     /// Identifier of the session to close.
     std::string sessionId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionCloseParams&) const = default;
 };
 
 /// Result of the `session/close` request (empty object).
 struct SessionCloseResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionCloseResult&) const = default;
 };
@@ -789,12 +918,16 @@ struct SessionSetModeParams {
     std::string sessionId;
     /// Identifier of the mode to switch to.
     std::string modeId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetModeParams&) const = default;
 };
 
 /// Result of the `session/set_mode` request (empty object).
 struct SessionSetModeResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetModeResult&) const = default;
 };
@@ -809,6 +942,8 @@ struct SessionSetConfigOptionParams {
     std::optional<std::string> type{}; // "boolean" when `value` is a bool
     /// New value: a value id for `select`, a `bool` for `boolean`.
     SessionConfigValue value{std::string{}};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetConfigOptionParams&) const = default;
 };
@@ -817,6 +952,8 @@ struct SessionSetConfigOptionParams {
 struct SessionSetConfigOptionResult {
     /// Full, updated set of the session's config options.
     std::vector<SessionConfigOption> configOptions{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetConfigOptionResult&) const = default;
 };
@@ -830,6 +967,8 @@ struct SessionSetModelParams {
     std::string sessionId;
     /// Identifier of the model to switch to.
     std::string modelId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetModelParams&) const = default;
 };
@@ -839,6 +978,8 @@ struct SessionSetModelParams {
 ///
 /// @note Unstable in ACP: not part of the stable ACP v1 schema.
 struct SessionSetModelResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetModelResult&) const = default;
 };
@@ -849,6 +990,8 @@ struct SessionPromptParams {
     std::string sessionId;
     /// Content blocks of the user's message.
     std::vector<ContentBlock> prompt;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionPromptParams&) const = default;
 };
@@ -857,6 +1000,8 @@ struct SessionPromptParams {
 struct SessionPromptResult {
     /// Why the turn ended: `"end_turn"` (default), `"max_tokens"`, `"max_turn_requests"`, `"refusal"` or `"cancelled"` (open set).
     std::string stopReason{"end_turn"}; // "end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionPromptResult&) const = default;
 };
@@ -865,6 +1010,8 @@ struct SessionPromptResult {
 struct SessionCancelParams {
     /// Identifier of the session whose prompt turn should be cancelled.
     std::string sessionId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionCancelParams&) const = default;
 };
@@ -876,6 +1023,8 @@ struct SessionCancelParams {
 struct CancelRequestParams {
     /// Identifier of the request to cancel. Defaults to `0`.
     RequestId requestId{std::int64_t{0}};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CancelRequestParams&) const = default;
 };
@@ -891,6 +1040,8 @@ struct UserMessageChunk {
     ContentBlock content;
     /// Optional identifier grouping chunks that belong to the same message.
     std::optional<std::string> messageId{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const UserMessageChunk&) const = default;
 };
@@ -903,6 +1054,8 @@ struct AgentMessageChunk {
     ContentBlock content;
     /// Optional identifier grouping chunks that belong to the same message.
     std::optional<std::string> messageId{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AgentMessageChunk&) const = default;
 };
@@ -915,6 +1068,8 @@ struct AgentThoughtChunk {
     ContentBlock content;
     /// Optional identifier grouping chunks that belong to the same message.
     std::optional<std::string> messageId{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AgentThoughtChunk&) const = default;
 };
@@ -925,6 +1080,8 @@ struct ToolCallLocation {
     std::string path;
     /// Optional line number within the file.
     std::optional<std::uint32_t> line{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallLocation&) const = default;
 };
@@ -935,6 +1092,8 @@ struct ToolCallContentItem {
     std::string_view type{"content"};
     /// The wrapped content block.
     ContentBlock content;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallContentItem&) const = default;
 };
@@ -949,6 +1108,8 @@ struct ToolCallDiffItem {
     std::optional<std::string> oldText{};
     /// New text after the modification.
     std::string newText;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallDiffItem&) const = default;
 };
@@ -959,6 +1120,8 @@ struct ToolCallTerminalItem {
     std::string_view type{"terminal"};
     /// Identifier of the embedded terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallTerminalItem&) const = default;
 };
@@ -969,7 +1132,8 @@ struct ToolCallTerminalItem {
 using ToolCallContent = std::variant<
     ToolCallContentItem,
     ToolCallDiffItem,
-    ToolCallTerminalItem
+    ToolCallTerminalItem,
+    Unknown
 >;
 
 // `sessionUpdate: "tool_call"` (the spec's `ToolCall`): announces a new tool call
@@ -997,6 +1161,8 @@ struct ToolCallUpdate {
     std::optional<RawJson> rawInput{};
     /// Optional raw output returned by the tool (arbitrary JSON).
     std::optional<RawJson> rawOutput{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallUpdate&) const = default;
 };
@@ -1029,6 +1195,8 @@ struct ToolCallStatusUpdate {
     std::optional<RawJson> rawInput{};
     /// Optional raw output returned by the tool (arbitrary JSON).
     std::optional<RawJson> rawOutput{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallStatusUpdate&) const = default;
 };
@@ -1041,6 +1209,8 @@ struct PlanEntry {
     std::string priority; // "high", "medium", "low"
     /// Execution status: `"pending"`, `"in_progress"` or `"completed"`.
     std::string status;   // "pending", "in_progress", "completed"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PlanEntry&) const = default;
 };
@@ -1051,6 +1221,8 @@ struct PlanUpdate {
     std::string_view sessionUpdate{"plan"};
     /// Complete list of plan entries; replaces any previously sent plan.
     std::vector<PlanEntry> entries{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PlanUpdate&) const = default;
 };
@@ -1062,6 +1234,8 @@ struct PlanUpdate {
 struct AvailableCommandInput {
     /// Hint text shown to the user for the command's input.
     std::string hint;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AvailableCommandInput&) const = default;
 };
@@ -1074,6 +1248,8 @@ struct AvailableCommand {
     std::string description;
     /// Optional input specification; absent when the command takes no input.
     std::optional<AvailableCommandInput> input{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AvailableCommand&) const = default;
 };
@@ -1084,6 +1260,8 @@ struct AvailableCommandsUpdate {
     std::string_view sessionUpdate{"available_commands_update"};
     /// Complete list of currently available commands.
     std::vector<AvailableCommand> availableCommands{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AvailableCommandsUpdate&) const = default;
 };
@@ -1094,6 +1272,8 @@ struct CurrentModeUpdate {
     std::string_view sessionUpdate{"current_mode_update"};
     /// Identifier of the now-active mode.
     std::string currentModeId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CurrentModeUpdate&) const = default;
 };
@@ -1104,6 +1284,8 @@ struct ConfigOptionUpdate {
     std::string_view sessionUpdate{"config_option_update"};
     /// Full, updated set of the session's config options.
     std::vector<SessionConfigOption> configOptions{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ConfigOptionUpdate&) const = default;
 };
@@ -1116,6 +1298,8 @@ struct SessionInfoUpdate {
     std::optional<std::string> title{};
     /// Optional new last-activity timestamp (ISO 8601).
     std::optional<std::string> updatedAt{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionInfoUpdate&) const = default;
 };
@@ -1126,6 +1310,8 @@ struct Cost {
     double amount{0.0};
     /// ISO 4217 currency code, e.g. `"USD"`.
     std::string currency; // ISO 4217, e.g. "USD"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const Cost&) const = default;
 };
@@ -1140,6 +1326,8 @@ struct UsageUpdate {
     std::uint64_t size{0}; // context window size in tokens
     /// Optional cumulative cost of the session.
     std::optional<Cost> cost{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const UsageUpdate&) const = default;
 };
@@ -1156,6 +1344,8 @@ struct NoticeUpdate {
     std::string title;
     /// Optional longer description.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const NoticeUpdate&) const = default;
 };
@@ -1174,6 +1364,8 @@ struct CompactionUpdate {
     std::optional<std::vector<ContentBlock>> summary{};
     /// Optional error message when the compaction failed.
     std::optional<std::string> error{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CompactionUpdate&) const = default;
 };
@@ -1186,6 +1378,8 @@ struct CompactionSummaryChunk {
     std::string compactionId;
     /// The summary content being streamed.
     ContentBlock content;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CompactionSummaryChunk&) const = default;
 };
@@ -1207,7 +1401,8 @@ using SessionUpdatePayload = std::variant<
     UsageUpdate,
     NoticeUpdate,
     CompactionUpdate,
-    CompactionSummaryChunk
+    CompactionSummaryChunk,
+    Unknown
 >;
 
 /// Parameters of the `session/update` notification (agent -> client).
@@ -1216,6 +1411,8 @@ struct SessionUpdateNotification {
     std::string sessionId;
     /// The update payload (discriminated by `sessionUpdate`).
     SessionUpdatePayload update;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionUpdateNotification&) const = default;
 };
@@ -1229,6 +1426,8 @@ struct PermissionOption {
     std::string name;
     /// Option kind: `"allow_once"`, `"allow_always"`, `"reject_once"` or `"reject_always"`.
     std::string kind; // "allow_once", "allow_always", "reject_once", "reject_always"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PermissionOption&) const = default;
 };
@@ -1255,6 +1454,8 @@ struct PermissionToolCallInfo {
     std::optional<RawJson> rawInput{};
     /// Optional raw output returned by the tool (arbitrary JSON).
     std::optional<RawJson> rawOutput{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PermissionToolCallInfo&) const = default;
 };
@@ -1267,6 +1468,8 @@ struct RequestPermissionParams {
     PermissionToolCallInfo toolCall;
     /// Options to present to the user.
     std::vector<PermissionOption> options{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const RequestPermissionParams&) const = default;
 };
@@ -1275,6 +1478,8 @@ struct RequestPermissionParams {
 struct PermissionCancelledOutcome {
     /// Discriminator; always `"cancelled"` on the wire.
     std::string_view outcome{"cancelled"};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PermissionCancelledOutcome&) const = default;
 };
@@ -1285,6 +1490,8 @@ struct PermissionSelectedOutcome {
     std::string_view outcome{"selected"};
     /// Identifier of the option the user selected.
     std::string optionId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PermissionSelectedOutcome&) const = default;
 };
@@ -1294,13 +1501,16 @@ struct PermissionSelectedOutcome {
 /// Discriminated by `outcome`; see @ref variant_tag<PermissionOutcome>.
 using PermissionOutcome = std::variant<
     PermissionCancelledOutcome,
-    PermissionSelectedOutcome
+    PermissionSelectedOutcome,
+    Unknown
 >;
 
 /// Result of the `session/request_permission` request.
 struct RequestPermissionResult {
     /// The user's decision.
     PermissionOutcome outcome;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const RequestPermissionResult&) const = default;
 };
@@ -1333,6 +1543,8 @@ struct CreateElicitationParams {
     std::optional<std::string> toolCallId{};
     /// Optional request scope: the JSON-RPC request the elicitation relates to.
     std::optional<RequestId> requestId{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CreateElicitationParams&) const = default;
 };
@@ -1343,6 +1555,8 @@ struct CreateElicitationResult {
     std::string action{"cancel"}; // "accept", "decline", "cancel"
     /// Submitted form values when `action == "accept"`; optional.
     std::optional<RawJson> content{}; // submitted form values when action == "accept"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CreateElicitationResult&) const = default;
 };
@@ -1353,6 +1567,8 @@ struct CreateElicitationResult {
 struct CompleteElicitationParams {
     /// Identifier of the completed elicitation.
     std::string elicitationId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CompleteElicitationParams&) const = default;
 };
@@ -1370,6 +1586,8 @@ struct FsReadTextFileParams {
     std::optional<std::uint32_t> line{};
     /// Optional maximum number of lines to read.
     std::optional<std::uint32_t> limit{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FsReadTextFileParams&) const = default;
 };
@@ -1378,6 +1596,8 @@ struct FsReadTextFileParams {
 struct FsReadTextFileResult {
     /// The file contents read.
     std::string content;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FsReadTextFileResult&) const = default;
 };
@@ -1392,12 +1612,16 @@ struct FsWriteTextFileParams {
     std::string path;
     /// Text to write to the file.
     std::string content;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FsWriteTextFileParams&) const = default;
 };
 
 /// Result of the `fs/write_text_file` request (empty object).
 struct FsWriteTextFileResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FsWriteTextFileResult&) const = default;
 };
@@ -1419,6 +1643,8 @@ struct TerminalCreateParams {
     std::vector<EnvVariable> env{};
     /// Optional maximum number of output bytes to retain; older output is truncated beyond it.
     std::optional<std::uint64_t> outputByteLimit{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalCreateParams&) const = default;
 };
@@ -1427,6 +1653,8 @@ struct TerminalCreateParams {
 struct TerminalCreateResult {
     /// Identifier of the created terminal.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalCreateResult&) const = default;
 };
@@ -1437,6 +1665,8 @@ struct TerminalOutputParams {
     std::string sessionId;
     /// Identifier of the terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalOutputParams&) const = default;
 };
@@ -1447,6 +1677,8 @@ struct TerminalExitStatus {
     std::optional<int> exitCode{};
     /// Signal that terminated the process; absent on normal exit.
     std::optional<std::string> signal{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalExitStatus&) const = default;
 };
@@ -1459,6 +1691,8 @@ struct TerminalOutputResult {
     bool truncated{false};
     /// Exit status; present only once the command has exited.
     std::optional<TerminalExitStatus> exitStatus{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalOutputResult&) const = default;
 };
@@ -1469,6 +1703,8 @@ struct TerminalWaitForExitParams {
     std::string sessionId;
     /// Identifier of the terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalWaitForExitParams&) const = default;
 };
@@ -1479,6 +1715,8 @@ struct TerminalWaitForExitResult {
     std::optional<int> exitCode{};
     /// Signal that terminated the process; absent on normal exit.
     std::optional<std::string> signal{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalWaitForExitResult&) const = default;
 };
@@ -1491,12 +1729,16 @@ struct TerminalKillParams {
     std::string sessionId;
     /// Identifier of the terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalKillParams&) const = default;
 };
 
 /// Result of the `terminal/kill` request (empty object).
 struct TerminalKillResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalKillResult&) const = default;
 };
@@ -1509,12 +1751,16 @@ struct TerminalReleaseParams {
     std::string sessionId;
     /// Identifier of the terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalReleaseParams&) const = default;
 };
 
 /// Result of the `terminal/release` request (empty object).
 struct TerminalReleaseResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalReleaseResult&) const = default;
 };
@@ -1524,7 +1770,8 @@ struct TerminalReleaseResult {
 /// Tagged-union discriminator metadata for a protocol `std::variant`, shared by all codecs.
 ///
 /// Specializations provide `key` (the discriminator JSON field), `ids` (the tag value of each
-/// alternative, in index order) and `untagged` (the alternative selected when `key` is absent,
+/// known alternative, in index order; the trailing @ref Unknown alternative has no id and catches any
+/// other tag value) and `untagged` (the alternative selected when `key` is absent,
 /// or `-1` if the tag is required).
 /// @tparam Variant The `std::variant` type being described.
 template <typename Variant>

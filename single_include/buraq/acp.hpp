@@ -448,11 +448,27 @@ namespace buraq::v1 {
 /// ACP protocol version implemented by this SDK (sent/expected in `initialize`).
 inline constexpr std::uint32_t kProtocolVersion = 1;
 
+/// Alternative of every tagged union holding a variant this SDK does not know (yet).
+///
+/// Produced when decoding a discriminator value introduced by a newer protocol revision or a custom
+/// extension, so peers keep working instead of rejecting the whole message. `raw` holds the complete
+/// JSON object and is written back verbatim when encoded.
+struct Unknown {
+    /// Discriminator value found on the wire (e.g. the unrecognized `sessionUpdate` kind).
+    std::string tag{};
+    /// The complete JSON object, as received.
+    RawJson raw{};
+    /// Lexicographic comparison of the tag and raw text.
+    auto operator<=>(const Unknown&) const = default;
+};
+
 // Presence-only capability object (`{}` on the wire means "supported")
 /// Presence-only capability object.
 ///
 /// Serialized as `{}`; its presence (in an `std::optional`) means the capability is supported.
 struct CapabilityMarker {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CapabilityMarker&) const = default;
 };
@@ -464,6 +480,8 @@ struct FileSystemCapabilities {
     bool readTextFile{false};
     /// Client supports `fs/write_text_file`. Defaults to `false`.
     bool writeTextFile{false};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FileSystemCapabilities&) const = default;
 };
@@ -472,6 +490,8 @@ struct FileSystemCapabilities {
 struct SessionConfigOptionsCapabilities {
     /// Present when the client supports `boolean` config options; optional.
     std::optional<CapabilityMarker> boolean{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionConfigOptionsCapabilities&) const = default;
 };
@@ -484,6 +504,8 @@ struct ClientSessionCapabilities {
     std::optional<SessionConfigOptionsCapabilities> configOptions{};
     /// Present when the client supports `notice` session updates; optional.
     std::optional<CapabilityMarker> notices{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ClientSessionCapabilities&) const = default;
 };
@@ -492,6 +514,8 @@ struct ClientSessionCapabilities {
 struct ClientAuthCapabilities {
     /// Client supports terminal-based authentication methods. Defaults to `false`.
     bool terminal{false};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ClientAuthCapabilities&) const = default;
 };
@@ -502,6 +526,8 @@ struct ElicitationCapabilities {
     std::optional<CapabilityMarker> form{};
     /// Present when the client supports URL-mode elicitation; optional.
     std::optional<CapabilityMarker> url{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ElicitationCapabilities&) const = default;
 };
@@ -520,6 +546,8 @@ struct ClientCapabilities {
     std::optional<ClientAuthCapabilities> auth{};
     /// Supported elicitation modes; optional (absent means no elicitation).
     std::optional<ElicitationCapabilities> elicitation{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ClientCapabilities&) const = default;
 };
@@ -534,6 +562,8 @@ struct PromptCapabilities {
     bool audio{false};
     /// Agent accepts embedded resources in prompts. Defaults to `false`.
     bool embeddedContext{false};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PromptCapabilities&) const = default;
 };
@@ -546,6 +576,8 @@ struct McpCapabilities {
     bool http{false};
     /// Agent can connect to SSE MCP servers. Defaults to `false`.
     bool sse{false};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const McpCapabilities&) const = default;
 };
@@ -554,6 +586,8 @@ struct McpCapabilities {
 struct SystemPromptModeCapabilities {
     /// Present when the agent supports `mode: "override"`; optional.
     std::optional<CapabilityMarker> override{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SystemPromptModeCapabilities&) const = default;
 };
@@ -562,6 +596,8 @@ struct SystemPromptModeCapabilities {
 struct SystemPromptCapabilities {
     /// Supported system-prompt modes; optional.
     std::optional<SystemPromptModeCapabilities> mode{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SystemPromptCapabilities&) const = default;
 };
@@ -583,6 +619,8 @@ struct SessionCapabilities {
     std::optional<CapabilityMarker> resume{};
     /// Present when the agent supports `session/close`; optional.
     std::optional<CapabilityMarker> close{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionCapabilities&) const = default;
 };
@@ -591,6 +629,8 @@ struct SessionCapabilities {
 struct AgentAuthCapabilities {
     /// Present when the agent supports `logout`; optional.
     std::optional<CapabilityMarker> logout{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AgentAuthCapabilities&) const = default;
 };
@@ -609,6 +649,8 @@ struct AgentCapabilities {
     std::optional<SessionCapabilities> sessionCapabilities{};
     /// Authentication capabilities; optional.
     std::optional<AgentAuthCapabilities> auth{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AgentCapabilities&) const = default;
 };
@@ -621,6 +663,8 @@ struct ImplementationInfo {
     std::string version;
     /// Optional human-readable display name.
     std::optional<std::string> title{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ImplementationInfo&) const = default;
 };
@@ -636,6 +680,8 @@ struct AuthMethodAgent {
     std::string name;
     /// Optional description of the method.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AuthMethodAgent&) const = default;
 };
@@ -656,6 +702,8 @@ struct AuthMethodTerminal {
     std::optional<std::vector<std::string>> args{};
     /// Optional extra environment variables for the terminal login flow.
     std::optional<std::map<std::string, std::string>> env{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AuthMethodTerminal&) const = default;
 };
@@ -665,31 +713,40 @@ struct AuthMethodTerminal {
 /// Discriminated by `type`; see @ref variant_tag<AuthMethod>.
 using AuthMethod = std::variant<
     AuthMethodAgent,
-    AuthMethodTerminal
+    AuthMethodTerminal,
+    Unknown
 >;
 
 /// Parameters of the `authenticate` request.
 struct AuthenticateParams {
     /// Identifier of an auth method advertised in the `initialize` result; required.
     std::string methodId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AuthenticateParams&) const = default;
 };
 
 /// Result of the `authenticate` request (empty object).
 struct AuthenticateResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AuthenticateResult&) const = default;
 };
 
 /// Parameters of the `logout` request (empty object).
 struct LogoutParams {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const LogoutParams&) const = default;
 };
 
 /// Result of the `logout` request (empty object).
 struct LogoutResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const LogoutResult&) const = default;
 };
@@ -703,6 +760,8 @@ struct InitializeParams {
     ClientCapabilities clientCapabilities{};
     /// Optional information about the client implementation.
     std::optional<ImplementationInfo> clientInfo{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const InitializeParams&) const = default;
 };
@@ -717,6 +776,8 @@ struct InitializeResult {
     std::vector<AuthMethod> authMethods{};
     /// Optional information about the agent implementation.
     std::optional<ImplementationInfo> agentInfo{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const InitializeResult&) const = default;
 };
@@ -730,6 +791,8 @@ struct Annotations {
     std::optional<std::string> lastModified{};
     /// Optional importance, from 0 (least) to 1 (most).
     std::optional<double> priority{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const Annotations&) const = default;
 };
@@ -742,6 +805,8 @@ struct TextContent {
     std::string text;
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TextContent&) const = default;
 };
@@ -760,6 +825,8 @@ struct ImageContent {
     std::optional<std::string> uri{};
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ImageContent&) const = default;
 };
@@ -776,6 +843,8 @@ struct AudioContent {
     std::string mimeType; // e.g., "audio/wav"
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AudioContent&) const = default;
 };
@@ -798,6 +867,8 @@ struct ResourceLinkContent {
     std::optional<std::int64_t> size{};
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ResourceLinkContent&) const = default;
 };
@@ -815,6 +886,8 @@ struct EmbeddedResourcePayload {
     std::optional<std::string> text{};
     /// Base64-encoded binary contents; set for binary resources.
     std::optional<std::string> blob{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const EmbeddedResourcePayload&) const = default;
 };
@@ -829,6 +902,8 @@ struct EmbeddedResourceContent {
     EmbeddedResourcePayload resource;
     /// Optional hints for the client about how to use or display the content.
     std::optional<Annotations> annotations{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const EmbeddedResourceContent&) const = default;
 };
@@ -841,7 +916,8 @@ using ContentBlock = std::variant<
     ImageContent,
     AudioContent,
     ResourceLinkContent,
-    EmbeddedResourceContent
+    EmbeddedResourceContent,
+    Unknown
 >;
 
 // --- MCP servers (tagged union discriminated by "type"; untagged = stdio) ---
@@ -851,6 +927,8 @@ struct EnvVariable {
     std::string name;
     /// Variable value.
     std::string value;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const EnvVariable&) const = default;
 };
@@ -861,6 +939,8 @@ struct HttpHeader {
     std::string name;
     /// Header value.
     std::string value;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const HttpHeader&) const = default;
 };
@@ -877,6 +957,8 @@ struct McpServerHttp {
     std::string url;
     /// HTTP headers to send with each request; may be empty.
     std::vector<HttpHeader> headers{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const McpServerHttp&) const = default;
 };
@@ -893,6 +975,8 @@ struct McpServerSse {
     std::string url;
     /// HTTP headers to send with each request; may be empty.
     std::vector<HttpHeader> headers{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const McpServerSse&) const = default;
 };
@@ -909,6 +993,8 @@ struct McpServerStdio {
     std::vector<std::string> args{};
     /// Environment variables to set; may be empty.
     std::vector<EnvVariable> env{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const McpServerStdio&) const = default;
 };
@@ -919,7 +1005,8 @@ struct McpServerStdio {
 using McpServer = std::variant<
     McpServerHttp,
     McpServerSse,
-    McpServerStdio
+    McpServerStdio,
+    Unknown
 >;
 
 // --- Session configuration ---
@@ -931,6 +1018,8 @@ struct SessionMode {
     std::string name;
     /// Optional description of the mode.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionMode&) const = default;
 };
@@ -941,6 +1030,8 @@ struct SessionModeState {
     std::string currentModeId;
     /// Modes the session can switch to.
     std::vector<SessionMode> availableModes{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionModeState&) const = default;
 };
@@ -956,6 +1047,8 @@ struct ModelInfo {
     std::string name;
     /// Optional description of the model.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ModelInfo&) const = default;
 };
@@ -969,6 +1062,8 @@ struct SessionModelState {
     std::string currentModelId;
     /// Models the session can switch to.
     std::vector<ModelInfo> availableModels{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionModelState&) const = default;
 };
@@ -985,6 +1080,8 @@ struct SessionConfigSelectOption {
     std::string name;
     /// Optional description of the value.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionConfigSelectOption&) const = default;
 };
@@ -1008,6 +1105,8 @@ struct SessionConfigSelectItem {
     /// Whether this entry is a group rather than a single option.
     /// @return `true` when `group` is set.
     [[nodiscard]] bool is_group() const noexcept { return group.has_value(); }
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionConfigSelectItem&) const = default;
 };
@@ -1028,6 +1127,8 @@ struct SessionConfigOption {
     SessionConfigValue currentValue{std::string{}};
     /// Selectable values; present for `select` options.
     std::optional<std::vector<SessionConfigSelectItem>> options{}; // present for "select"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionConfigOption&) const = default;
 };
@@ -1040,6 +1141,8 @@ struct SystemPrompt {
     std::string mode{"append"}; // "append", "override"
     /// System prompt content blocks.
     std::vector<ContentBlock> content{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SystemPrompt&) const = default;
 };
@@ -1055,6 +1158,8 @@ struct SessionNewParams {
     std::optional<std::vector<std::string>> additionalDirectories{};
     /// Optional client-supplied system prompt.
     std::optional<SystemPrompt> systemPrompt{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionNewParams&) const = default;
 };
@@ -1070,6 +1175,8 @@ struct SessionNewResult {
     /// Optional session model state.
     /// @note Unstable in ACP: not part of the stable ACP v1 schema.
     std::optional<SessionModelState> models{}; // UNSTABLE
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionNewResult&) const = default;
 };
@@ -1088,6 +1195,8 @@ struct SessionLoadParams {
     std::optional<std::vector<std::string>> additionalDirectories{};
     /// Optional client-supplied system prompt.
     std::optional<SystemPrompt> systemPrompt{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionLoadParams&) const = default;
 };
@@ -1101,6 +1210,8 @@ struct SessionLoadResult {
     /// Optional session model state.
     /// @note Unstable in ACP: not part of the stable ACP v1 schema.
     std::optional<SessionModelState> models{}; // UNSTABLE
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionLoadResult&) const = default;
 };
@@ -1119,6 +1230,8 @@ struct SessionResumeParams {
     std::optional<std::vector<std::string>> additionalDirectories{};
     /// Optional client-supplied system prompt.
     std::optional<SystemPrompt> systemPrompt{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionResumeParams&) const = default;
 };
@@ -1132,6 +1245,8 @@ struct SessionResumeResult {
     /// Optional session model state.
     /// @note Unstable in ACP: not part of the stable ACP v1 schema.
     std::optional<SessionModelState> models{}; // UNSTABLE
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionResumeResult&) const = default;
 };
@@ -1144,6 +1259,8 @@ struct SessionListParams {
     std::optional<std::string> cwd{};
     /// Optional opaque pagination cursor from a previous `nextCursor`.
     std::optional<std::string> cursor{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionListParams&) const = default;
 };
@@ -1160,6 +1277,8 @@ struct SessionInfo {
     std::optional<std::string> title{};
     /// Optional last-activity timestamp (ISO 8601).
     std::optional<std::string> updatedAt{}; // ISO 8601
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionInfo&) const = default;
 };
@@ -1170,6 +1289,8 @@ struct SessionListResult {
     std::vector<SessionInfo> sessions{};
     /// Cursor for the next page; absent when there are no more results.
     std::optional<std::string> nextCursor{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionListResult&) const = default;
 };
@@ -1180,12 +1301,16 @@ struct SessionListResult {
 struct SessionDeleteParams {
     /// Identifier of the session to delete.
     std::string sessionId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionDeleteParams&) const = default;
 };
 
 /// Result of the `session/delete` request (empty object).
 struct SessionDeleteResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionDeleteResult&) const = default;
 };
@@ -1196,12 +1321,16 @@ struct SessionDeleteResult {
 struct SessionCloseParams {
     /// Identifier of the session to close.
     std::string sessionId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionCloseParams&) const = default;
 };
 
 /// Result of the `session/close` request (empty object).
 struct SessionCloseResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionCloseResult&) const = default;
 };
@@ -1212,12 +1341,16 @@ struct SessionSetModeParams {
     std::string sessionId;
     /// Identifier of the mode to switch to.
     std::string modeId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetModeParams&) const = default;
 };
 
 /// Result of the `session/set_mode` request (empty object).
 struct SessionSetModeResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetModeResult&) const = default;
 };
@@ -1232,6 +1365,8 @@ struct SessionSetConfigOptionParams {
     std::optional<std::string> type{}; // "boolean" when `value` is a bool
     /// New value: a value id for `select`, a `bool` for `boolean`.
     SessionConfigValue value{std::string{}};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetConfigOptionParams&) const = default;
 };
@@ -1240,6 +1375,8 @@ struct SessionSetConfigOptionParams {
 struct SessionSetConfigOptionResult {
     /// Full, updated set of the session's config options.
     std::vector<SessionConfigOption> configOptions{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetConfigOptionResult&) const = default;
 };
@@ -1253,6 +1390,8 @@ struct SessionSetModelParams {
     std::string sessionId;
     /// Identifier of the model to switch to.
     std::string modelId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetModelParams&) const = default;
 };
@@ -1262,6 +1401,8 @@ struct SessionSetModelParams {
 ///
 /// @note Unstable in ACP: not part of the stable ACP v1 schema.
 struct SessionSetModelResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionSetModelResult&) const = default;
 };
@@ -1272,6 +1413,8 @@ struct SessionPromptParams {
     std::string sessionId;
     /// Content blocks of the user's message.
     std::vector<ContentBlock> prompt;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionPromptParams&) const = default;
 };
@@ -1280,6 +1423,8 @@ struct SessionPromptParams {
 struct SessionPromptResult {
     /// Why the turn ended: `"end_turn"` (default), `"max_tokens"`, `"max_turn_requests"`, `"refusal"` or `"cancelled"` (open set).
     std::string stopReason{"end_turn"}; // "end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionPromptResult&) const = default;
 };
@@ -1288,6 +1433,8 @@ struct SessionPromptResult {
 struct SessionCancelParams {
     /// Identifier of the session whose prompt turn should be cancelled.
     std::string sessionId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionCancelParams&) const = default;
 };
@@ -1299,6 +1446,8 @@ struct SessionCancelParams {
 struct CancelRequestParams {
     /// Identifier of the request to cancel. Defaults to `0`.
     RequestId requestId{std::int64_t{0}};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CancelRequestParams&) const = default;
 };
@@ -1314,6 +1463,8 @@ struct UserMessageChunk {
     ContentBlock content;
     /// Optional identifier grouping chunks that belong to the same message.
     std::optional<std::string> messageId{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const UserMessageChunk&) const = default;
 };
@@ -1326,6 +1477,8 @@ struct AgentMessageChunk {
     ContentBlock content;
     /// Optional identifier grouping chunks that belong to the same message.
     std::optional<std::string> messageId{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AgentMessageChunk&) const = default;
 };
@@ -1338,6 +1491,8 @@ struct AgentThoughtChunk {
     ContentBlock content;
     /// Optional identifier grouping chunks that belong to the same message.
     std::optional<std::string> messageId{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AgentThoughtChunk&) const = default;
 };
@@ -1348,6 +1503,8 @@ struct ToolCallLocation {
     std::string path;
     /// Optional line number within the file.
     std::optional<std::uint32_t> line{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallLocation&) const = default;
 };
@@ -1358,6 +1515,8 @@ struct ToolCallContentItem {
     std::string_view type{"content"};
     /// The wrapped content block.
     ContentBlock content;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallContentItem&) const = default;
 };
@@ -1372,6 +1531,8 @@ struct ToolCallDiffItem {
     std::optional<std::string> oldText{};
     /// New text after the modification.
     std::string newText;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallDiffItem&) const = default;
 };
@@ -1382,6 +1543,8 @@ struct ToolCallTerminalItem {
     std::string_view type{"terminal"};
     /// Identifier of the embedded terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallTerminalItem&) const = default;
 };
@@ -1392,7 +1555,8 @@ struct ToolCallTerminalItem {
 using ToolCallContent = std::variant<
     ToolCallContentItem,
     ToolCallDiffItem,
-    ToolCallTerminalItem
+    ToolCallTerminalItem,
+    Unknown
 >;
 
 // `sessionUpdate: "tool_call"` (the spec's `ToolCall`): announces a new tool call
@@ -1420,6 +1584,8 @@ struct ToolCallUpdate {
     std::optional<RawJson> rawInput{};
     /// Optional raw output returned by the tool (arbitrary JSON).
     std::optional<RawJson> rawOutput{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallUpdate&) const = default;
 };
@@ -1452,6 +1618,8 @@ struct ToolCallStatusUpdate {
     std::optional<RawJson> rawInput{};
     /// Optional raw output returned by the tool (arbitrary JSON).
     std::optional<RawJson> rawOutput{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ToolCallStatusUpdate&) const = default;
 };
@@ -1464,6 +1632,8 @@ struct PlanEntry {
     std::string priority; // "high", "medium", "low"
     /// Execution status: `"pending"`, `"in_progress"` or `"completed"`.
     std::string status;   // "pending", "in_progress", "completed"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PlanEntry&) const = default;
 };
@@ -1474,6 +1644,8 @@ struct PlanUpdate {
     std::string_view sessionUpdate{"plan"};
     /// Complete list of plan entries; replaces any previously sent plan.
     std::vector<PlanEntry> entries{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PlanUpdate&) const = default;
 };
@@ -1485,6 +1657,8 @@ struct PlanUpdate {
 struct AvailableCommandInput {
     /// Hint text shown to the user for the command's input.
     std::string hint;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AvailableCommandInput&) const = default;
 };
@@ -1497,6 +1671,8 @@ struct AvailableCommand {
     std::string description;
     /// Optional input specification; absent when the command takes no input.
     std::optional<AvailableCommandInput> input{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AvailableCommand&) const = default;
 };
@@ -1507,6 +1683,8 @@ struct AvailableCommandsUpdate {
     std::string_view sessionUpdate{"available_commands_update"};
     /// Complete list of currently available commands.
     std::vector<AvailableCommand> availableCommands{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const AvailableCommandsUpdate&) const = default;
 };
@@ -1517,6 +1695,8 @@ struct CurrentModeUpdate {
     std::string_view sessionUpdate{"current_mode_update"};
     /// Identifier of the now-active mode.
     std::string currentModeId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CurrentModeUpdate&) const = default;
 };
@@ -1527,6 +1707,8 @@ struct ConfigOptionUpdate {
     std::string_view sessionUpdate{"config_option_update"};
     /// Full, updated set of the session's config options.
     std::vector<SessionConfigOption> configOptions{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const ConfigOptionUpdate&) const = default;
 };
@@ -1539,6 +1721,8 @@ struct SessionInfoUpdate {
     std::optional<std::string> title{};
     /// Optional new last-activity timestamp (ISO 8601).
     std::optional<std::string> updatedAt{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionInfoUpdate&) const = default;
 };
@@ -1549,6 +1733,8 @@ struct Cost {
     double amount{0.0};
     /// ISO 4217 currency code, e.g. `"USD"`.
     std::string currency; // ISO 4217, e.g. "USD"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const Cost&) const = default;
 };
@@ -1563,6 +1749,8 @@ struct UsageUpdate {
     std::uint64_t size{0}; // context window size in tokens
     /// Optional cumulative cost of the session.
     std::optional<Cost> cost{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const UsageUpdate&) const = default;
 };
@@ -1579,6 +1767,8 @@ struct NoticeUpdate {
     std::string title;
     /// Optional longer description.
     std::optional<std::string> description{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const NoticeUpdate&) const = default;
 };
@@ -1597,6 +1787,8 @@ struct CompactionUpdate {
     std::optional<std::vector<ContentBlock>> summary{};
     /// Optional error message when the compaction failed.
     std::optional<std::string> error{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CompactionUpdate&) const = default;
 };
@@ -1609,6 +1801,8 @@ struct CompactionSummaryChunk {
     std::string compactionId;
     /// The summary content being streamed.
     ContentBlock content;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CompactionSummaryChunk&) const = default;
 };
@@ -1630,7 +1824,8 @@ using SessionUpdatePayload = std::variant<
     UsageUpdate,
     NoticeUpdate,
     CompactionUpdate,
-    CompactionSummaryChunk
+    CompactionSummaryChunk,
+    Unknown
 >;
 
 /// Parameters of the `session/update` notification (agent -> client).
@@ -1639,6 +1834,8 @@ struct SessionUpdateNotification {
     std::string sessionId;
     /// The update payload (discriminated by `sessionUpdate`).
     SessionUpdatePayload update;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const SessionUpdateNotification&) const = default;
 };
@@ -1652,6 +1849,8 @@ struct PermissionOption {
     std::string name;
     /// Option kind: `"allow_once"`, `"allow_always"`, `"reject_once"` or `"reject_always"`.
     std::string kind; // "allow_once", "allow_always", "reject_once", "reject_always"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PermissionOption&) const = default;
 };
@@ -1678,6 +1877,8 @@ struct PermissionToolCallInfo {
     std::optional<RawJson> rawInput{};
     /// Optional raw output returned by the tool (arbitrary JSON).
     std::optional<RawJson> rawOutput{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PermissionToolCallInfo&) const = default;
 };
@@ -1690,6 +1891,8 @@ struct RequestPermissionParams {
     PermissionToolCallInfo toolCall;
     /// Options to present to the user.
     std::vector<PermissionOption> options{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const RequestPermissionParams&) const = default;
 };
@@ -1698,6 +1901,8 @@ struct RequestPermissionParams {
 struct PermissionCancelledOutcome {
     /// Discriminator; always `"cancelled"` on the wire.
     std::string_view outcome{"cancelled"};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PermissionCancelledOutcome&) const = default;
 };
@@ -1708,6 +1913,8 @@ struct PermissionSelectedOutcome {
     std::string_view outcome{"selected"};
     /// Identifier of the option the user selected.
     std::string optionId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const PermissionSelectedOutcome&) const = default;
 };
@@ -1717,13 +1924,16 @@ struct PermissionSelectedOutcome {
 /// Discriminated by `outcome`; see @ref variant_tag<PermissionOutcome>.
 using PermissionOutcome = std::variant<
     PermissionCancelledOutcome,
-    PermissionSelectedOutcome
+    PermissionSelectedOutcome,
+    Unknown
 >;
 
 /// Result of the `session/request_permission` request.
 struct RequestPermissionResult {
     /// The user's decision.
     PermissionOutcome outcome;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const RequestPermissionResult&) const = default;
 };
@@ -1756,6 +1966,8 @@ struct CreateElicitationParams {
     std::optional<std::string> toolCallId{};
     /// Optional request scope: the JSON-RPC request the elicitation relates to.
     std::optional<RequestId> requestId{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CreateElicitationParams&) const = default;
 };
@@ -1766,6 +1978,8 @@ struct CreateElicitationResult {
     std::string action{"cancel"}; // "accept", "decline", "cancel"
     /// Submitted form values when `action == "accept"`; optional.
     std::optional<RawJson> content{}; // submitted form values when action == "accept"
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CreateElicitationResult&) const = default;
 };
@@ -1776,6 +1990,8 @@ struct CreateElicitationResult {
 struct CompleteElicitationParams {
     /// Identifier of the completed elicitation.
     std::string elicitationId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const CompleteElicitationParams&) const = default;
 };
@@ -1793,6 +2009,8 @@ struct FsReadTextFileParams {
     std::optional<std::uint32_t> line{};
     /// Optional maximum number of lines to read.
     std::optional<std::uint32_t> limit{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FsReadTextFileParams&) const = default;
 };
@@ -1801,6 +2019,8 @@ struct FsReadTextFileParams {
 struct FsReadTextFileResult {
     /// The file contents read.
     std::string content;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FsReadTextFileResult&) const = default;
 };
@@ -1815,12 +2035,16 @@ struct FsWriteTextFileParams {
     std::string path;
     /// Text to write to the file.
     std::string content;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FsWriteTextFileParams&) const = default;
 };
 
 /// Result of the `fs/write_text_file` request (empty object).
 struct FsWriteTextFileResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const FsWriteTextFileResult&) const = default;
 };
@@ -1842,6 +2066,8 @@ struct TerminalCreateParams {
     std::vector<EnvVariable> env{};
     /// Optional maximum number of output bytes to retain; older output is truncated beyond it.
     std::optional<std::uint64_t> outputByteLimit{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalCreateParams&) const = default;
 };
@@ -1850,6 +2076,8 @@ struct TerminalCreateParams {
 struct TerminalCreateResult {
     /// Identifier of the created terminal.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalCreateResult&) const = default;
 };
@@ -1860,6 +2088,8 @@ struct TerminalOutputParams {
     std::string sessionId;
     /// Identifier of the terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalOutputParams&) const = default;
 };
@@ -1870,6 +2100,8 @@ struct TerminalExitStatus {
     std::optional<int> exitCode{};
     /// Signal that terminated the process; absent on normal exit.
     std::optional<std::string> signal{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalExitStatus&) const = default;
 };
@@ -1882,6 +2114,8 @@ struct TerminalOutputResult {
     bool truncated{false};
     /// Exit status; present only once the command has exited.
     std::optional<TerminalExitStatus> exitStatus{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalOutputResult&) const = default;
 };
@@ -1892,6 +2126,8 @@ struct TerminalWaitForExitParams {
     std::string sessionId;
     /// Identifier of the terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalWaitForExitParams&) const = default;
 };
@@ -1902,6 +2138,8 @@ struct TerminalWaitForExitResult {
     std::optional<int> exitCode{};
     /// Signal that terminated the process; absent on normal exit.
     std::optional<std::string> signal{};
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalWaitForExitResult&) const = default;
 };
@@ -1914,12 +2152,16 @@ struct TerminalKillParams {
     std::string sessionId;
     /// Identifier of the terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalKillParams&) const = default;
 };
 
 /// Result of the `terminal/kill` request (empty object).
 struct TerminalKillResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalKillResult&) const = default;
 };
@@ -1932,12 +2174,16 @@ struct TerminalReleaseParams {
     std::string sessionId;
     /// Identifier of the terminal, as returned by `terminal/create`.
     std::string terminalId;
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalReleaseParams&) const = default;
 };
 
 /// Result of the `terminal/release` request (empty object).
 struct TerminalReleaseResult {
+    /// Extension metadata (`_meta`), passed through verbatim; reserved by ACP for custom data.
+    std::optional<RawJson> _meta{};
     /// Defaulted member-wise three-way comparison (also provides `==`).
     auto operator<=>(const TerminalReleaseResult&) const = default;
 };
@@ -1947,7 +2193,8 @@ struct TerminalReleaseResult {
 /// Tagged-union discriminator metadata for a protocol `std::variant`, shared by all codecs.
 ///
 /// Specializations provide `key` (the discriminator JSON field), `ids` (the tag value of each
-/// alternative, in index order) and `untagged` (the alternative selected when `key` is absent,
+/// known alternative, in index order; the trailing @ref Unknown alternative has no id and catches any
+/// other tag value) and `untagged` (the alternative selected when `key` is absent,
 /// or `-1` if the tag is required).
 /// @tparam Variant The `std::variant` type being described.
 template <typename Variant>
@@ -2237,6 +2484,383 @@ inline std::optional<std::string> validate(const TerminalReleaseParams& p) {
 } // namespace buraq::v1
 // ---- end buraq/protocol/schema_v1.hpp ----
 
+// ---- begin buraq/core/async.hpp ----
+/// @file
+/// @brief Asynchronous request plumbing shared by AgentBase and ClientBase.
+///
+/// - buraq::Responder: completes an inbound request later (deferred replies), from any thread.
+/// - buraq::use_future: completion token that turns any typed outbound request into a `std::future`.
+/// - buraq::detail::PendingRequests: thread-safe id allocation and response correlation.
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <span>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+
+namespace buraq {
+
+/// Type-erased outbound sink: receives one serialized JSON-RPC message per call.
+using OutboundFn = std::function<void(std::span<const std::byte>)>;
+
+/// Completion token type; see buraq::use_future.
+struct use_future_t {
+    explicit constexpr use_future_t() = default;
+};
+
+/// Completion token: pass it instead of a callback to receive a
+/// `std::future<expected<Result, RpcError>>` from any typed outbound request.
+///
+/// @code
+/// auto session = client.send_session_new({.cwd = "/repo"}, conn.sink(), buraq::use_future).get();
+/// @endcode
+/// @warning Only block on the future from a thread other than the one feeding inbound frames
+///          (buraq::Connection does this for you), otherwise the reply can never be processed.
+inline constexpr use_future_t use_future{};
+
+/// Handle used to answer an inbound JSON-RPC request later (deferred reply).
+///
+/// Request hooks that take a `Responder<Result>` by value and return `void` are dispatched in deferred mode:
+/// the base class does not reply on return, the handler (or whoever it hands the responder to) does, by calling
+/// respond(), fail() or reply() exactly once, possibly from another thread. This is how an agent keeps a
+/// `session/prompt` open while it waits for the client (permission, fs, terminal) or processes `session/cancel`,
+/// and how a client answers `session/request_permission` after a UI click.
+///
+/// Responders are cheap shared handles (copyable). If the last copy is destroyed without replying, an
+/// `-32603` (Internal error) reply is sent so the peer never waits forever.
+///
+/// @code
+/// void on_session_prompt(const v1::SessionPromptParams& p, buraq::Responder<v1::SessionPromptResult> done) {
+///     request_permission(perm_params, done.sink(), [done](auto outcome) mutable {
+///         done.respond({.stopReason = outcome ? "end_turn" : "refusal"});
+///     });
+/// }
+/// @endcode
+/// @tparam Result Result type of the request being answered.
+/// @note Thread-safe; the captured sink must be safe to call from whichever thread completes the responder.
+template <typename Result>
+class Responder {
+public:
+    /// Result type of the request being answered.
+    using result_type = Result;
+
+    /// Creates an empty (invalid) responder.
+    Responder() = default;
+
+    /// Binds a responder to an inbound request.
+    /// @tparam Codec JSON codec used to encode the reply.
+    /// @param id  Id of the request to answer.
+    /// @param out Outbound sink; it is copied and kept until the reply is sent.
+    /// @return A valid responder.
+    template <typename Codec>
+    static Responder create(RequestId id, OutboundFn out) {
+        Responder r;
+        r.state_ = std::make_shared<State>();
+        r.state_->id = std::move(id);
+        r.state_->out = std::move(out);
+        r.state_->encode_result = +[](const RequestId& rid, const Result& value) {
+            return Codec::encode_result(rid, value);
+        };
+        r.state_->encode_error = +[](const RequestId& rid, const RpcError& err) {
+            return Codec::encode_error(rid, err);
+        };
+        return r;
+    }
+
+    /// Reports whether this responder is bound to a request.
+    [[nodiscard]] bool valid() const noexcept { return state_ != nullptr; }
+    /// Reports whether a reply has already been sent.
+    [[nodiscard]] bool done() const noexcept { return !state_ || state_->done.load(); }
+    /// Id of the request being answered. @pre valid()
+    [[nodiscard]] const RequestId& id() const noexcept { return state_->id; }
+
+    /// Outbound sink of the connection the request arrived on; use it to stream notifications or send
+    /// requests while the reply is pending (e.g. `emit_session_update(update, responder.sink())`).
+    /// @pre valid()
+    [[nodiscard]] const OutboundFn& sink() const noexcept { return state_->out; }
+
+    /// Sends a success reply.
+    /// @param value Result to encode.
+    /// @return `true` if this call sent the reply; `false` if one was already sent (or the responder is invalid).
+    bool respond(Result value) { return reply(expected<Result, RpcError>(std::move(value))); }
+
+    /// Sends an error reply.
+    /// @param error Error to encode.
+    /// @return `true` if this call sent the reply; `false` if one was already sent (or the responder is invalid).
+    bool fail(RpcError error) { return reply(expected<Result, RpcError>(unexpected(std::move(error)))); }
+
+    /// Sends a success or error reply.
+    /// @param outcome Result or error to encode.
+    /// @return `true` if this call sent the reply; `false` if one was already sent (or the responder is invalid).
+    bool reply(expected<Result, RpcError> outcome) {
+        if (!state_ || state_->done.exchange(true)) {
+            return false;
+        }
+        state_->send(outcome ? state_->encode_result(state_->id, *outcome)
+                             : state_->encode_error(state_->id, outcome.error()));
+        return true;
+    }
+
+private:
+    struct State {
+        RequestId id{};
+        OutboundFn out{};
+        std::string (*encode_result)(const RequestId&, const Result&){nullptr};
+        std::string (*encode_error)(const RequestId&, const RpcError&){nullptr};
+        std::atomic<bool> done{false};
+
+        void send(const std::string& wire) const {
+            if (out) out(std::as_bytes(std::span{wire.data(), wire.size()}));
+        }
+
+        ~State() {
+            if (done.exchange(true)) return;
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
+            try {
+                send(encode_error(id, RpcError::internal_error("Request handler dropped its Responder without replying")));
+            } catch (...) {
+            }
+#else
+            send(encode_error(id, RpcError::internal_error("Request handler dropped its Responder without replying")));
+#endif
+        }
+    };
+
+    std::shared_ptr<State> state_{};
+};
+
+namespace detail {
+
+/// Detects a buraq::Responder specialization.
+template <typename T>
+inline constexpr bool is_responder_v = false;
+/// @cond INTERNAL
+template <typename R>
+inline constexpr bool is_responder_v<Responder<R>> = true;
+/// @endcond
+
+/// Detects the buraq::use_future completion token.
+template <typename T>
+inline constexpr bool is_use_future_v = std::is_same_v<std::remove_cvref_t<T>, use_future_t>;
+
+/// Invokes a request hook, converting escaping exceptions into `-32603` (Internal error).
+/// @tparam Fn Callable returning `expected<R, RpcError>`.
+/// @param fn Hook invocation.
+/// @return The hook's result, or the converted exception.
+template <typename Fn>
+auto invoke_guarded(Fn&& fn) -> decltype(fn()) {
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
+    try {
+        return fn();
+    } catch (const std::exception& ex) {
+        return unexpected(RpcError::internal_error(ex.what()));
+    } catch (...) {
+        return unexpected(RpcError::internal_error());
+    }
+#else
+    return fn();
+#endif
+}
+
+/// Invokes a deferred request hook; an escaping exception fails the responder with `-32603`.
+/// @tparam Result Result type of the request.
+/// @tparam Fn Callable `(Responder<Result>) -> void`.
+/// @param responder Responder handed to the hook (a copy is kept to report exceptions).
+/// @param fn Hook invocation.
+template <typename Result, typename Fn>
+void invoke_deferred(Responder<Result> responder, Fn&& fn) {
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
+    try {
+        fn(responder);
+    } catch (const std::exception& ex) {
+        responder.fail(RpcError::internal_error(ex.what()));
+    } catch (...) {
+        responder.fail(RpcError::internal_error());
+    }
+#else
+    fn(responder);
+#endif
+}
+
+/// Thread-safe table of outbound requests awaiting a response, keyed by integer request id.
+class PendingRequests {
+public:
+    /// Continuation invoked with the response envelope of a pending request.
+    using Handler = std::function<void(const RawEnvelope&)>;
+
+    PendingRequests() = default;
+    PendingRequests(const PendingRequests&) = delete;
+    PendingRequests& operator=(const PendingRequests&) = delete;
+    /// Transfers the pending entries and id counter of @p other.
+    PendingRequests(PendingRequests&& other) noexcept {
+        std::lock_guard lock(other.mutex_);
+        next_id_.store(other.next_id_.load());
+        handlers_ = std::move(other.handlers_);
+    }
+    /// Transfers the pending entries and id counter of @p other.
+    PendingRequests& operator=(PendingRequests&& other) noexcept {
+        if (this != &other) {
+            std::scoped_lock lock(mutex_, other.mutex_);
+            next_id_.store(other.next_id_.load());
+            handlers_ = std::move(other.handlers_);
+        }
+        return *this;
+    }
+
+    /// Allocates the next request id (starts at 1).
+    std::int64_t allocate() noexcept { return next_id_.fetch_add(1); }
+
+    /// Registers @p handler for request @p id.
+    void add(std::int64_t id, Handler handler) {
+        std::lock_guard lock(mutex_);
+        handlers_.insert_or_assign(id, std::move(handler));
+    }
+
+    /// Removes the entry for @p id without invoking it.
+    /// @return `true` if an entry was removed.
+    bool erase(std::int64_t id) {
+        std::lock_guard lock(mutex_);
+        return handlers_.erase(id) > 0;
+    }
+
+    /// Completes the entry matching the response's integer id, invoking its handler outside the lock.
+    /// @return `true` if a pending entry matched.
+    bool complete(const RawEnvelope& env) {
+        if (!env.id || !std::holds_alternative<std::int64_t>(*env.id)) return false;
+        Handler handler;
+        {
+            std::lock_guard lock(mutex_);
+            auto it = handlers_.find(std::get<std::int64_t>(*env.id));
+            if (it == handlers_.end()) return false;
+            handler = std::move(it->second);
+            handlers_.erase(it);
+        }
+        handler(env);
+        return true;
+    }
+
+    /// Fails and clears every entry with @p reason.
+    void cancel_all(const RpcError& reason) {
+        std::unordered_map<std::int64_t, Handler> pending;
+        {
+            std::lock_guard lock(mutex_);
+            pending.swap(handlers_);
+        }
+        for (auto& [id, handler] : pending) {
+            RawEnvelope err_env{.id = RequestId{id}, .error = reason};
+            handler(err_env);
+        }
+    }
+
+    /// Number of requests awaiting a response.
+    [[nodiscard]] std::size_t size() const {
+        std::lock_guard lock(mutex_);
+        return handlers_.size();
+    }
+
+private:
+    mutable std::mutex mutex_{};
+    std::atomic<std::int64_t> next_id_{1};
+    std::unordered_map<std::int64_t, Handler> handlers_{};
+};
+
+/// Allocates an id, registers a typed continuation and emits a request.
+///
+/// @tparam Result Result type the reply is decoded into.
+/// @tparam Codec  JSON codec.
+/// @param pending  Pending-request table.
+/// @param token    Callback `cb(expected<Result, RpcError>)` or buraq::use_future.
+/// @param on_value Invoked with the decoded result before the callback (e.g. to record capabilities).
+/// @param emit     Invoked as `emit(RequestId)` to encode and write the request.
+/// @return The request id for callbacks, or `std::future<expected<Result, RpcError>>` for buraq::use_future.
+template <typename Result, typename Codec, typename Token, typename OnValue, typename Emit>
+auto send_typed_request(PendingRequests& pending, Token&& token, OnValue on_value, Emit&& emit) {
+    using Outcome = expected<Result, RpcError>;
+    const auto id = pending.allocate();
+
+    auto register_handler = [&](auto callback) {
+        pending.add(id, [callback = std::move(callback), on_value = std::move(on_value)](const RawEnvelope& env) mutable {
+            if (env.error.has_value()) {
+                callback(Outcome(unexpected(*env.error)));
+                return;
+            }
+            auto decoded = Codec::template decode<Result>(env.result_json);
+            if (decoded) on_value(*decoded);
+            callback(std::move(decoded));
+        });
+    };
+
+    auto emit_or_unregister = [&] {
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
+        try {
+            emit(RequestId{id});
+        } catch (...) {
+            pending.erase(id);
+            throw;
+        }
+#else
+        emit(RequestId{id});
+#endif
+    };
+
+    if constexpr (is_use_future_v<Token>) {
+        auto promise = std::make_shared<std::promise<Outcome>>();
+        auto future = promise->get_future();
+        register_handler([promise](Outcome outcome) { promise->set_value(std::move(outcome)); });
+        emit_or_unregister();
+        return future;
+    } else {
+        register_handler(std::decay_t<Token>(std::forward<Token>(token)));
+        emit_or_unregister();
+        return id;
+    }
+}
+
+/// No-op `on_value` hook for send_typed_request().
+struct ignore_value {
+    /// Discards the value.
+    template <typename T>
+    void operator()(const T&) const noexcept {}
+};
+
+/// Copyable boolean that is safe to read and write from several threads.
+class AtomicFlag {
+public:
+    /// Starts `false`.
+    AtomicFlag() = default;
+    /// Copies the current value of @p other.
+    AtomicFlag(const AtomicFlag& other) noexcept : value_(other.value_.load()) {}
+    /// Assigns the current value of @p other.
+    AtomicFlag& operator=(const AtomicFlag& other) noexcept {
+        value_.store(other.value_.load());
+        return *this;
+    }
+    /// Stores @p v.
+    AtomicFlag& operator=(bool v) noexcept {
+        value_.store(v);
+        return *this;
+    }
+    /// Loads the value.
+    operator bool() const noexcept { return value_.load(); }
+
+private:
+    std::atomic<bool> value_{false};
+};
+
+} // namespace detail
+
+} // namespace buraq
+// ---- end buraq/core/async.hpp ----
+
 // ---- begin buraq/core/agent_base.hpp ----
 #include <concepts>
 #include <cstddef>
@@ -2246,6 +2870,7 @@ inline std::optional<std::string> validate(const TerminalReleaseParams& p) {
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <type_traits>
 
 /// Root namespace of the buraq Agent Client Protocol (ACP) v1 SDK.
 namespace buraq {
@@ -2296,8 +2921,18 @@ namespace buraq {
 /// - `void on_session_cancel(const v1::SessionCancelParams&)` -- `session/cancel`
 /// - `void on_cancel_request(const v1::CancelRequestParams&)` -- `$/cancel_request`
 /// - `void on_ext_notification(std::string_view method, const RawJson& params)` -- any `_`-prefixed notification
-/// - `void on_raw_response(const RawEnvelope&)` -- responses to agent-initiated requests (request_permission(),
-///   request_fs_read(), ...)
+/// - `void on_raw_response(const RawEnvelope&)` -- responses to agent-initiated requests sent with the raw
+///   (untyped) helpers; typed requests complete their callback / future instead.
+///
+/// Deferred replies: every request hook may instead take a `Responder<Result>` by value and return `void`, e.g.
+/// `void on_session_prompt(const v1::SessionPromptParams&, Responder<v1::SessionPromptResult>)`. The reply is then
+/// sent whenever the responder is completed (from any thread); see Responder. An exception escaping any hook is
+/// answered with `-32603` instead of propagating out of feed().
+///
+/// Agent -> Client requests (request_permission(), read_text_file(), write_text_file(), create_terminal(), ...,
+/// send_request()) take a completion token: a callback `cb(expected<Result, RpcError>)` or buraq::use_future.
+/// buraq::runtime::Connection / buraq::runtime::serve_stdio() run the I/O on their own threads, so hooks may
+/// simply block on `use_future` replies.
 ///
 /// @code
 /// class EchoAgent : public buraq::AgentBase<EchoAgent, buraq::GlazeCodec> {
@@ -2326,7 +2961,7 @@ namespace buraq {
 ///
 /// int main() {
 ///     EchoAgent agent;
-///     return buraq::transport::run_stdio_agent(agent);
+///     return buraq::runtime::serve_stdio(agent); // or the single-threaded transport::run_stdio_agent(agent)
 /// }
 /// @endcode
 ///
@@ -2336,6 +2971,10 @@ namespace buraq {
 /// @see ClientBase
 template <typename Derived, JsonCodec Codec>
 class AgentBase {
+public:
+    /// JSON codec this agent encodes and decodes with.
+    using codec_type = Codec;
+
 protected:
     /// Returns `*this` downcast to the derived agent type.
     /// @return Mutable reference to the `Derived` object.
@@ -2608,9 +3247,110 @@ public:
         emit_bytes(Codec::encode_request(id, method, params), std::forward<OutboundSink>(sink));
     }
 
+    // --- Typed Delegated Client Requests (automatic ids, decoded replies) ---
+    // Pass a callback `cb(expected<Result, RpcError>)` (returns the request id) or buraq::use_future
+    // (returns std::future<expected<Result, RpcError>>; block on it only from a thread that is not feeding frames).
+
+    /// Asks the client for permission to run a tool call and decodes the reply.
+    /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message.
+    /// @tparam Token Callback `cb(expected<v1::RequestPermissionResult, RpcError>)` or buraq::use_future.
+    /// @param params Session, tool call and permission options.
+    /// @param sink   Outbound byte sink.
+    /// @param token  Completion callback or buraq::use_future.
+    /// @return The request id (callback) or a `std::future` of the outcome (buraq::use_future).
+    template <typename OutboundSink, typename Token>
+    auto request_permission(const v1::RequestPermissionParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::RequestPermissionResult>("session/request_permission", params, sink,
+                                                       std::forward<Token>(token));
+    }
+
+    /// Asks the client to read a text file and decodes the reply (see request_permission(params, sink, token)).
+    /// @note Only valid if client_can_read_text_file().
+    template <typename OutboundSink, typename Token>
+    auto request_fs_read(const v1::FsReadTextFileParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::FsReadTextFileResult>("fs/read_text_file", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to write a text file and decodes the reply (see request_permission(params, sink, token)).
+    /// @note Only valid if client_can_write_text_file().
+    template <typename OutboundSink, typename Token>
+    auto request_fs_write(const v1::FsWriteTextFileParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::FsWriteTextFileResult>("fs/write_text_file", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to start a command in a new terminal (see request_permission(params, sink, token)).
+    /// @note Only valid if client_supports_terminal().
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_create(const v1::TerminalCreateParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::TerminalCreateResult>("terminal/create", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client for a terminal's current output (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_output(const v1::TerminalOutputParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::TerminalOutputResult>("terminal/output", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to wait for a terminal's command to exit (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_wait_for_exit(const v1::TerminalWaitForExitParams& params, OutboundSink&& sink,
+                                        Token&& token) {
+        return send_typed<v1::TerminalWaitForExitResult>("terminal/wait_for_exit", params, sink,
+                                                         std::forward<Token>(token));
+    }
+
+    /// Asks the client to kill a terminal's command (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_kill(const v1::TerminalKillParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::TerminalKillResult>("terminal/kill", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to release a terminal (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_terminal_release(const v1::TerminalReleaseParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::TerminalReleaseResult>("terminal/release", params, sink, std::forward<Token>(token));
+    }
+
+    /// Asks the client to collect structured input from the user (see request_permission(params, sink, token)).
+    template <typename OutboundSink, typename Token>
+    auto request_elicitation(const v1::CreateElicitationParams& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<v1::CreateElicitationResult>("elicitation/create", params, sink,
+                                                       std::forward<Token>(token));
+    }
+
+    /// Sends a custom `_`-prefixed extension request and delivers the raw JSON result.
+    /// @param method Extension method name.
+    /// @param params Raw JSON parameters.
+    /// @param sink   Outbound byte sink.
+    /// @param token  Callback `cb(expected<RawJson, RpcError>)` or buraq::use_future.
+    template <typename OutboundSink, typename Token>
+    auto request_ext_method(std::string_view method, const RawJson& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<RawJson>(method, params, sink, std::forward<Token>(token));
+    }
+
+    /// Sends any request (e.g. an unstable method this SDK does not model yet) and decodes the reply as @p Result.
+    /// @tparam Result Result type to decode.
+    /// @param method JSON-RPC method name.
+    /// @param params Parameters (any type the codec can encode).
+    /// @param sink   Outbound byte sink.
+    /// @param token  Callback `cb(expected<Result, RpcError>)` or buraq::use_future.
+    template <typename Result, typename Params, typename OutboundSink, typename Token>
+    auto send_request(std::string_view method, const Params& params, OutboundSink&& sink, Token&& token) {
+        return send_typed<Result>(method, params, sink, std::forward<Token>(token));
+    }
+
+    /// Returns the number of typed agent -> client requests still awaiting a reply.
+    [[nodiscard]] std::size_t pending_count() const { return pending_.size(); }
+
+    /// Fails and clears every in-flight typed request (useful on transport disconnect).
+    /// @param reason Error delivered to every pending continuation; defaults to `-32800` (Request cancelled).
+    void cancel_all_pending(const RpcError& reason = RpcError::request_cancelled()) { pending_.cancel_all(reason); }
+
 private:
     /// Set when `on_initialize` succeeds; gates all other requests when `Derived` implements `on_initialize`.
-    bool initialized_{false};
+    detail::AtomicFlag initialized_{};
+    /// Typed agent -> client requests awaiting a reply.
+    detail::PendingRequests pending_{};
     /// Client capabilities from the last successful `initialize`.
     std::optional<v1::ClientCapabilities> client_capabilities_{};
     /// Client implementation info from the last successful `initialize`.
@@ -2625,6 +3365,9 @@ private:
     template <typename OutboundSink>
     expected<void, RpcError> dispatch_message(const RawEnvelope& env, OutboundSink&& sink) {
         if (env.is_response()) {
+            if (pending_.complete(env)) {
+                return {};
+            }
             if constexpr (requires(Derived& d, const RawEnvelope& r) { d.on_raw_response(r); }) {
                 self().on_raw_response(env);
             }
@@ -2637,7 +3380,7 @@ private:
                     env, sink, [this](Derived& d, const v1::InitializeParams& p, OutboundSink&) {
                         client_capabilities_ = p.clientCapabilities;
                         client_info_ = p.clientInfo;
-                        auto result = d.on_initialize(p);
+                        auto result = detail::invoke_guarded([&] { return d.on_initialize(p); });
                         initialized_ = result.has_value();
                         if (!result) {
                             client_capabilities_.reset();
@@ -2660,86 +3403,46 @@ private:
             }
         }
 
-        if (env.method == "authenticate") {
-            if constexpr (requires(Derived& d, const v1::AuthenticateParams& p) { d.on_authenticate(p); }) {
-                return handle_request<v1::AuthenticateParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_authenticate(p); });
-            }
-        }
+// Routes a request to `Derived::HOOK`, preferring the deferred form `void HOOK(const PARAMS&, Responder<RESULT>)`
+// over the synchronous form `expected<RESULT, RpcError> HOOK(const PARAMS&)`.
+#define BURAQ_AGENT_ROUTE(NAME, HOOK, PARAMS, RESULT)                                                            \
+    if (env.method == NAME) {                                                                                  \
+        if constexpr (requires(Derived& d, const PARAMS& p, Responder<RESULT> r) {                             \
+                          { d.HOOK(p, std::move(r)) } -> std::same_as<void>;                                    \
+                      }) {                                                                                     \
+            return handle_deferred<PARAMS, RESULT>(                                                            \
+                env, sink, [](Derived& d, const PARAMS& p, Responder<RESULT> r) { d.HOOK(p, std::move(r)); }); \
+        } else if constexpr (requires(Derived& d, const PARAMS& p) { d.HOOK(p); }) {                           \
+            return handle_request<PARAMS>(env, sink, [](Derived& d, const PARAMS& p, auto&) { return d.HOOK(p); }); \
+        }                                                                                                      \
+    }
 
-        if (env.method == "logout") {
-            if constexpr (requires(Derived& d, const v1::LogoutParams& p) { d.on_logout(p); }) {
-                return handle_request<v1::LogoutParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_logout(p); });
-            }
-        }
+        BURAQ_AGENT_ROUTE("authenticate", on_authenticate, v1::AuthenticateParams, v1::AuthenticateResult)
+        BURAQ_AGENT_ROUTE("logout", on_logout, v1::LogoutParams, v1::LogoutResult)
+        BURAQ_AGENT_ROUTE("session/new", on_session_new, v1::SessionNewParams, v1::SessionNewResult)
+        BURAQ_AGENT_ROUTE("session/load", on_session_load, v1::SessionLoadParams, v1::SessionLoadResult)
+        BURAQ_AGENT_ROUTE("session/resume", on_session_resume, v1::SessionResumeParams, v1::SessionResumeResult)
+        BURAQ_AGENT_ROUTE("session/list", on_session_list, v1::SessionListParams, v1::SessionListResult)
+        BURAQ_AGENT_ROUTE("session/delete", on_session_delete, v1::SessionDeleteParams, v1::SessionDeleteResult)
+        BURAQ_AGENT_ROUTE("session/close", on_session_close, v1::SessionCloseParams, v1::SessionCloseResult)
+        BURAQ_AGENT_ROUTE("session/set_mode", on_session_set_mode, v1::SessionSetModeParams, v1::SessionSetModeResult)
+        BURAQ_AGENT_ROUTE("session/set_config_option", on_session_set_config_option, v1::SessionSetConfigOptionParams,
+                          v1::SessionSetConfigOptionResult)
+        BURAQ_AGENT_ROUTE("session/set_model", on_session_set_model, v1::SessionSetModelParams,
+                          v1::SessionSetModelResult)
 
-        if (env.method == "session/new") {
-            if constexpr (requires(Derived& d, const v1::SessionNewParams& p) { d.on_session_new(p); }) {
-                return handle_request<v1::SessionNewParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_new(p); });
-            }
-        }
-
-        if (env.method == "session/load") {
-            if constexpr (requires(Derived& d, const v1::SessionLoadParams& p) { d.on_session_load(p); }) {
-                return handle_request<v1::SessionLoadParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_load(p); });
-            }
-        }
-
-        if (env.method == "session/resume") {
-            if constexpr (requires(Derived& d, const v1::SessionResumeParams& p) { d.on_session_resume(p); }) {
-                return handle_request<v1::SessionResumeParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_resume(p); });
-            }
-        }
-
-        if (env.method == "session/list") {
-            if constexpr (requires(Derived& d, const v1::SessionListParams& p) { d.on_session_list(p); }) {
-                return handle_request<v1::SessionListParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_list(p); });
-            }
-        }
-
-        if (env.method == "session/delete") {
-            if constexpr (requires(Derived& d, const v1::SessionDeleteParams& p) { d.on_session_delete(p); }) {
-                return handle_request<v1::SessionDeleteParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_delete(p); });
-            }
-        }
-
-        if (env.method == "session/close") {
-            if constexpr (requires(Derived& d, const v1::SessionCloseParams& p) { d.on_session_close(p); }) {
-                return handle_request<v1::SessionCloseParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_close(p); });
-            }
-        }
-
-        if (env.method == "session/set_mode") {
-            if constexpr (requires(Derived& d, const v1::SessionSetModeParams& p) { d.on_session_set_mode(p); }) {
-                return handle_request<v1::SessionSetModeParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_set_mode(p); });
-            }
-        }
-
-        if (env.method == "session/set_config_option") {
-            if constexpr (requires(Derived& d, const v1::SessionSetConfigOptionParams& p) {
-                d.on_session_set_config_option(p);
-            }) {
-                return handle_request<v1::SessionSetConfigOptionParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_set_config_option(p); });
-            }
-        }
-
-        if (env.method == "session/set_model") {
-            if constexpr (requires(Derived& d, const v1::SessionSetModelParams& p) { d.on_session_set_model(p); }) {
-                return handle_request<v1::SessionSetModelParams>(
-                    env, sink, [](Derived& d, const auto& p, auto&) { return d.on_session_set_model(p); });
-            }
-        }
+#undef BURAQ_AGENT_ROUTE
 
         if (env.method == "session/prompt") {
+            if constexpr (requires(Derived& d, const v1::SessionPromptParams& p,
+                                   Responder<v1::SessionPromptResult> r) {
+                { d.on_session_prompt(p, std::move(r)) } -> std::same_as<void>;
+            }) {
+                return handle_deferred<v1::SessionPromptParams, v1::SessionPromptResult>(
+                    env, sink, [](Derived& d, const v1::SessionPromptParams& p, Responder<v1::SessionPromptResult> r) {
+                        d.on_session_prompt(p, std::move(r));
+                    });
+            }
 #if BURAQ_HAS_STD_GENERATOR
             if constexpr (requires(Derived& d, const v1::SessionPromptParams& p) {
                 { d.on_session_prompt_stream(p) } -> std::same_as<generator<v1::SessionUpdatePayload>>;
@@ -2808,10 +3511,18 @@ private:
     expected<void, RpcError> dispatch_extension(const RawEnvelope& env, OutboundSink& sink) {
         const RawJson params{std::string(env.params_json)};
         if (env.id.has_value()) {
-            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
+            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p, Responder<RawJson> r) {
+                { d.on_ext_method(m, p, std::move(r)) } -> std::same_as<void>;
+            }) {
+                std::string method{env.method};
+                detail::invoke_deferred(make_responder<RawJson>(*env.id, sink), [&](Responder<RawJson>& r) {
+                    self().on_ext_method(method, params, r);
+                });
+                return {};
+            } else if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
                 { d.on_ext_method(m, p) } -> std::same_as<expected<RawJson, RpcError>>;
             }) {
-                auto result = self().on_ext_method(env.method, params);
+                auto result = detail::invoke_guarded([&] { return self().on_ext_method(env.method, params); });
                 if (!result) {
                     emit_bytes(Codec::encode_error(*env.id, result.error()), sink);
                 } else {
@@ -2854,13 +3565,64 @@ private:
             return {};
         }
 
-        auto result = handler(self(), *params, sink);
+        auto result = detail::invoke_guarded([&] { return handler(self(), *params, sink); });
         if (!result) {
             emit_bytes(Codec::encode_error(*env.id, result.error()), sink);
         } else {
             emit_bytes(Codec::encode_result(*env.id, *result), sink);
         }
         return {};
+    }
+
+    /// Binds a Responder to request @p id, copying @p sink into it.
+    /// @tparam Result Result type of the request.
+    /// @tparam OutboundSink Copy-constructible sink type.
+    template <typename Result, typename OutboundSink>
+    static Responder<Result> make_responder(const RequestId& id, OutboundSink& sink) {
+        static_assert(std::is_copy_constructible_v<std::remove_cvref_t<OutboundSink>>,
+                      "Deferred (Responder) handlers keep a copy of the outbound sink: it must be copy-constructible "
+                      "(wrap stateful sinks with std::ref or use a shared handle)");
+        return Responder<Result>::template create<Codec>(id, OutboundFn(sink));
+    }
+
+    /// Decodes and validates a request, then hands a Responder to a deferred hook.
+    /// Decode and validation failures are answered immediately; otherwise the reply is sent whenever the hook
+    /// (or a copy of its Responder) completes it. An exception escaping the hook fails the request with `-32603`.
+    /// @tparam Params  Parameter type to decode from `params`.
+    /// @tparam Result  Result type of the request.
+    /// @tparam OutboundSink Copy-constructible sink type.
+    /// @tparam Handler Callable `(Derived&, const Params&, Responder<Result>) -> void`.
+    /// @param env     Parsed inbound request envelope.
+    /// @param sink    Outbound byte sink (copied into the Responder).
+    /// @param handler Invokes the `Derived` hook.
+    /// @return Empty on success; `-32600` (Invalid Request) if the envelope has no `id`.
+    template <typename Params, typename Result, typename OutboundSink, typename Handler>
+    expected<void, RpcError> handle_deferred(const RawEnvelope& env, OutboundSink& sink, Handler&& handler) {
+        if (!env.id.has_value()) {
+            return unexpected(RpcError::invalid_request("Expected request id for " + std::string(env.method)));
+        }
+
+        auto params = Codec::template decode<Params>(env.params_json);
+        if (!params) {
+            emit_bytes(Codec::encode_error(*env.id, params.error()), sink);
+            return {};
+        }
+        if (auto reason = v1::validate(*params)) {
+            emit_bytes(Codec::encode_error(*env.id, RpcError::invalid_params(*reason)), sink);
+            return {};
+        }
+
+        detail::invoke_deferred(make_responder<Result>(*env.id, sink),
+                                [&](Responder<Result>& r) { handler(self(), *params, r); });
+        return {};
+    }
+
+    /// Allocates an id, registers a typed continuation and emits an agent -> client request.
+    template <typename Result, typename Params, typename OutboundSink, typename Token>
+    auto send_typed(std::string_view method, const Params& params, OutboundSink& sink, Token&& token) {
+        return detail::send_typed_request<Result, Codec>(
+            pending_, std::forward<Token>(token), detail::ignore_value{},
+            [&](const RequestId& id) { emit_bytes(Codec::encode_request(id, method, params), sink); });
     }
 };
 
@@ -2878,6 +3640,7 @@ private:
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <type_traits>
 
 /// Root namespace of the buraq Agent Client Protocol (ACP) v1 SDK.
 namespace buraq {
@@ -2958,6 +3721,10 @@ namespace buraq {
 /// @see AgentBase
 template <typename Derived, JsonCodec Codec>
 class ClientBase {
+public:
+    /// JSON codec this client encodes and decodes with.
+    using codec_type = Codec;
+
 protected:
     /// Returns `*this` downcast to the derived client type.
     /// @return Mutable reference to the `Derived` object.
@@ -2966,13 +3733,8 @@ protected:
     /// @return Const reference to the `Derived` object.
     constexpr const Derived& self() const noexcept { return static_cast<const Derived&>(*this); }
 
-    /// Type-erased continuation invoked with the response envelope of a pending request.
-    using ResponseHandler = std::function<void(const RawEnvelope&)>;
-
-    /// Next JSON-RPC request id to allocate; starts at 1 and increments per outbound request.
-    std::int64_t next_id_{1};
-    /// In-flight typed requests keyed by request id, awaiting their response.
-    std::unordered_map<std::int64_t, ResponseHandler> pending_requests_{};
+    /// In-flight typed requests keyed by request id (thread-safe); ids start at 1.
+    detail::PendingRequests pending_{};
 
 public:
     // --- Fire-and-ID Outbound Requests (for custom correlation via on_raw_response) ---
@@ -3154,23 +3916,20 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::InitializeResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::InitializeResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Protocol version, client capabilities and client info.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     /// @note On success the result is also recorded for agent_capabilities(), agent_info() and auth_methods() before @p cb runs.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_initialize(const v1::InitializeParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_initialize(const v1::InitializeParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::InitializeResult>(
-            "initialize", params, std::forward<OutboundSink>(sink),
-            [this, callback = std::forward<Callback>(cb)](expected<v1::InitializeResult, RpcError> res) mutable {
-                if (res) {
-                    agent_capabilities_ = res->agentCapabilities;
-                    agent_info_ = res->agentInfo;
-                    auth_methods_ = res->authMethods;
-                }
-                callback(std::move(res));
+            "initialize", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb),
+            [this](const v1::InitializeResult& res) {
+                agent_capabilities_ = res.agentCapabilities;
+                agent_info_ = res.agentInfo;
+                auth_methods_ = res.authMethods;
             });
     }
 
@@ -3178,13 +3937,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::AuthenticateResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::AuthenticateResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Authentication method to use.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_authenticate(const v1::AuthenticateParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_authenticate(const v1::AuthenticateParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::AuthenticateResult>(
             "authenticate", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3193,13 +3952,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::LogoutResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::LogoutResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Logout parameters.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_logout(const v1::LogoutParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_logout(const v1::LogoutParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::LogoutResult>(
             "logout", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3208,13 +3967,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionNewResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionNewResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Working directory and MCP servers for the new session.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_new(const v1::SessionNewParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_new(const v1::SessionNewParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionNewResult>(
             "session/new", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3223,13 +3982,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionLoadResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionLoadResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session to load.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_load(const v1::SessionLoadParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_load(const v1::SessionLoadParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionLoadResult>(
             "session/load", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3238,13 +3997,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionResumeResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionResumeResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session to resume.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_resume(const v1::SessionResumeParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_resume(const v1::SessionResumeParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionResumeResult>(
             "session/resume", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3253,13 +4012,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionListResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionListResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Listing filters / pagination.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_list(const v1::SessionListParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_list(const v1::SessionListParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionListResult>(
             "session/list", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3268,13 +4027,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionDeleteResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionDeleteResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session to delete.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_delete(const v1::SessionDeleteParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_delete(const v1::SessionDeleteParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionDeleteResult>(
             "session/delete", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3283,13 +4042,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionCloseResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionCloseResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session to close.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_close(const v1::SessionCloseParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_close(const v1::SessionCloseParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionCloseResult>(
             "session/close", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3298,13 +4057,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetModeResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetModeResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session and mode id.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_set_mode(const v1::SessionSetModeParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_set_mode(const v1::SessionSetModeParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionSetModeResult>(
             "session/set_mode", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3313,13 +4072,13 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetConfigOptionResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetConfigOptionResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session, option id and value.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_set_config_option(const v1::SessionSetConfigOptionParams& params,
+    auto send_session_set_config_option(const v1::SessionSetConfigOptionParams& params,
                                                 OutboundSink&& sink,
                                                 Callback&& cb) {
         return send_request_typed<v1::SessionSetConfigOptionResult>(
@@ -3331,14 +4090,14 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetModelResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionSetModelResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session and model id.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     /// @note UNSTABLE: `session/set_model` is not part of the stable ACP v1 schema.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_set_model(const v1::SessionSetModelParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_set_model(const v1::SessionSetModelParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionSetModelResult>(
             "session/set_model", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
@@ -3347,27 +4106,27 @@ public:
     /// The id is allocated from an internal counter and @p cb is registered as a pending request until a response
     /// with that id is fed in (or cancel_all_pending() is called).
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionPromptResult, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<v1::SessionPromptResult, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param params Session id and prompt content blocks.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_session_prompt(const v1::SessionPromptParams& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_session_prompt(const v1::SessionPromptParams& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<v1::SessionPromptResult>(
             "session/prompt", params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
 
     /// Sends a custom extension request and invokes @p cb with the raw JSON reply.
     /// @tparam OutboundSink Callable invoked as `sink(std::span<const std::byte>)` with one serialized JSON-RPC message (NDJSON newline framing is left to the transport).
-    /// @tparam Callback Callable invoked once as `cb(expected<RawJson, RpcError>)` with the decoded result or the error reply.
+    /// @tparam Callback Callable invoked once as `cb(expected<RawJson, RpcError>)` with the decoded result or the error reply. Or buraq::use_future.
     /// @param method Extension method name; ACP reserves `_`-prefixed names for extensions.
     /// @param params Raw JSON parameters.
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
-    /// @return The JSON-RPC request id used.
+    /// @return The JSON-RPC request id used, or a `std::future` of the outcome when @p cb is buraq::use_future.
     template <typename OutboundSink, typename Callback>
-    std::int64_t send_ext_method(std::string_view method, const RawJson& params, OutboundSink&& sink, Callback&& cb) {
+    auto send_ext_method(std::string_view method, const RawJson& params, OutboundSink&& sink, Callback&& cb) {
         return send_request_typed<RawJson>(method, params, std::forward<OutboundSink>(sink), std::forward<Callback>(cb));
     }
 
@@ -3423,8 +4182,8 @@ public:
 
     /// Returns the number of typed requests still awaiting a response.
     /// @return Size of the pending-request table.
-    [[nodiscard]] std::size_t pending_count() const noexcept {
-        return pending_requests_.size();
+    [[nodiscard]] std::size_t pending_count() const {
+        return pending_.size();
     }
 
     // Fail and clear all in-flight requests (useful on transport disconnect)
@@ -3432,12 +4191,20 @@ public:
     /// Each pending callback is invoked with an error envelope carrying @p reason. Useful on transport disconnect.
     /// @param reason Error delivered to every pending callback; defaults to `-32800` (Request cancelled).
     void cancel_all_pending(const RpcError& reason = RpcError::request_cancelled()) {
-        auto pending = std::move(pending_requests_);
-        pending_requests_.clear();
-        for (auto& [id, handler] : pending) {
-            RawEnvelope err_env{.id = RequestId{id}, .error = reason};
-            handler(err_env);
-        }
+        pending_.cancel_all(reason);
+    }
+
+    /// Sends any request (e.g. an unstable method this SDK does not model yet) and decodes the reply as @p Result.
+    /// @tparam Result Result type to decode.
+    /// @param method JSON-RPC method name.
+    /// @param params Parameters (any type the codec can encode).
+    /// @param sink   Outbound byte sink.
+    /// @param cb     Callback `cb(expected<Result, RpcError>)` or buraq::use_future.
+    /// @return The request id (callback) or a `std::future` of the outcome (buraq::use_future).
+    template <typename Result, typename Params, typename OutboundSink, typename Callback>
+    auto send_request(std::string_view method, const Params& params, OutboundSink&& sink, Callback&& cb) {
+        return send_request_typed<Result>(method, params, std::forward<OutboundSink>(sink),
+                                          std::forward<Callback>(cb));
     }
 
     // --- Inbound Frame Entry Point ---
@@ -3492,7 +4259,7 @@ private:
     /// @return The allocated request id.
     template <typename Params, typename OutboundSink>
     std::int64_t send_request_raw(std::string_view method, const Params& params, OutboundSink&& sink) {
-        const auto id = next_id_++;
+        const auto id = pending_.allocate();
         emit_bytes(Codec::encode_request(RequestId{id}, method, params), std::forward<OutboundSink>(sink));
         return id;
     }
@@ -3508,22 +4275,16 @@ private:
     /// @param sink   Outbound byte sink.
     /// @param cb     Completion callback.
     /// @return The allocated request id.
-    template <typename Result, typename Params, typename OutboundSink, typename Callback>
-    std::int64_t send_request_typed(std::string_view method,
-                                    const Params& params,
-                                    OutboundSink&& sink,
-                                    Callback&& cb) {
-        const auto id = next_id_++;
-        pending_requests_.emplace(id, [callback = std::forward<Callback>(cb)](const RawEnvelope& env) mutable {
-            if (env.error.has_value()) {
-                callback(expected<Result, RpcError>(unexpected(*env.error)));
-                return;
-            }
-            callback(Codec::template decode<Result>(env.result_json));
-        });
-
-        emit_bytes(Codec::encode_request(RequestId{id}, method, params), std::forward<OutboundSink>(sink));
-        return id;
+    template <typename Result, typename Params, typename OutboundSink, typename Callback,
+              typename OnValue = detail::ignore_value>
+    auto send_request_typed(std::string_view method,
+                            const Params& params,
+                            OutboundSink&& sink,
+                            Callback&& cb,
+                            OnValue on_value = {}) {
+        return detail::send_typed_request<Result, Codec>(
+            pending_, std::forward<Callback>(cb), std::move(on_value),
+            [&](const RequestId& id) { emit_bytes(Codec::encode_request(id, method, params), sink); });
     }
 
     /// Dispatches an agent notification to the matching `Derived` hook.
@@ -3604,12 +4365,49 @@ private:
             return {};
         }
 
-        auto res = handler(self(), *params);
+        auto res = detail::invoke_guarded([&] { return handler(self(), *params); });
         if (!res) {
             emit_bytes(Codec::encode_error(*env.id, res.error()), sink);
         } else {
             emit_bytes(Codec::encode_result(*env.id, *res), sink);
         }
+        return {};
+    }
+
+    /// Binds a Responder to request @p id, copying @p sink into it.
+    template <typename Result, typename OutboundSink>
+    static Responder<Result> make_responder(const RequestId& id, OutboundSink& sink) {
+        static_assert(std::is_copy_constructible_v<std::remove_cvref_t<OutboundSink>>,
+                      "Deferred (Responder) handlers keep a copy of the outbound sink: it must be copy-constructible "
+                      "(wrap stateful sinks with std::ref or use a shared handle)");
+        return Responder<Result>::template create<Codec>(id, OutboundFn(sink));
+    }
+
+    /// Decodes and validates an agent request, then hands a Responder to a deferred hook.
+    /// Decode and validation failures are answered immediately; an exception escaping the hook fails the request
+    /// with `-32603`.
+    /// @tparam Params  Parameter type to decode from `params`.
+    /// @tparam Result  Result type of the request.
+    /// @tparam OutboundSink Copy-constructible sink type.
+    /// @tparam Handler Callable `(Derived&, const Params&, Responder<Result>) -> void`.
+    /// @param env     Parsed request envelope (must carry an id).
+    /// @param sink    Outbound byte sink (copied into the Responder).
+    /// @param handler Invokes the `Derived` hook.
+    /// @return Always empty.
+    template <typename Params, typename Result, typename OutboundSink, typename Handler>
+    expected<void, RpcError> handle_agent_request_deferred(const RawEnvelope& env, OutboundSink& sink,
+                                                           Handler&& handler) {
+        auto params = Codec::template decode<Params>(env.params_json);
+        if (!params) {
+            emit_bytes(Codec::encode_error(*env.id, params.error()), sink);
+            return {};
+        }
+        if (auto reason = v1::validate(*params)) {
+            emit_bytes(Codec::encode_error(*env.id, RpcError::invalid_params(*reason)), sink);
+            return {};
+        }
+        detail::invoke_deferred(make_responder<Result>(*env.id, sink),
+                                [&](Responder<Result>& r) { handler(self(), *params, r); });
         return {};
     }
 
@@ -3621,76 +4419,53 @@ private:
     /// @return Always empty.
     template <typename OutboundSink>
     expected<void, RpcError> dispatch_agent_request(const RawEnvelope& env, OutboundSink&& sink) {
-        if (env.method == "session/request_permission") {
-            if constexpr (requires(Derived& d, const v1::RequestPermissionParams& p) { d.on_request_permission(p); }) {
-                return handle_agent_request<v1::RequestPermissionParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_request_permission(p); });
-            }
-        }
+// Routes an agent request to `Derived::HOOK`, preferring the deferred form `void HOOK(const PARAMS&, Responder<RESULT>)`
+// over the synchronous form `expected<RESULT, RpcError> HOOK(const PARAMS&)`.
+#define BURAQ_CLIENT_ROUTE(NAME, HOOK, PARAMS, RESULT)                                                           \
+    if (env.method == NAME) {                                                                                  \
+        if constexpr (requires(Derived& d, const PARAMS& p, Responder<RESULT> r) {                             \
+                          { d.HOOK(p, std::move(r)) } -> std::same_as<void>;                                    \
+                      }) {                                                                                     \
+            return handle_agent_request_deferred<PARAMS, RESULT>(                                              \
+                env, sink, [](Derived& d, const PARAMS& p, Responder<RESULT> r) { d.HOOK(p, std::move(r)); }); \
+        } else if constexpr (requires(Derived& d, const PARAMS& p) { d.HOOK(p); }) {                           \
+            return handle_agent_request<PARAMS>(env, sink, [](Derived& d, const PARAMS& p) { return d.HOOK(p); }); \
+        }                                                                                                      \
+    }
 
-        if (env.method == "fs/read_text_file") {
-            if constexpr (requires(Derived& d, const v1::FsReadTextFileParams& p) { d.on_fs_read_text_file(p); }) {
-                return handle_agent_request<v1::FsReadTextFileParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_fs_read_text_file(p); });
-            }
-        }
+        BURAQ_CLIENT_ROUTE("session/request_permission", on_request_permission, v1::RequestPermissionParams,
+                           v1::RequestPermissionResult)
+        BURAQ_CLIENT_ROUTE("fs/read_text_file", on_fs_read_text_file, v1::FsReadTextFileParams,
+                           v1::FsReadTextFileResult)
+        BURAQ_CLIENT_ROUTE("fs/write_text_file", on_fs_write_text_file, v1::FsWriteTextFileParams,
+                           v1::FsWriteTextFileResult)
+        BURAQ_CLIENT_ROUTE("terminal/create", on_terminal_create, v1::TerminalCreateParams, v1::TerminalCreateResult)
+        BURAQ_CLIENT_ROUTE("terminal/output", on_terminal_output, v1::TerminalOutputParams, v1::TerminalOutputResult)
+        BURAQ_CLIENT_ROUTE("terminal/wait_for_exit", on_terminal_wait_for_exit, v1::TerminalWaitForExitParams,
+                           v1::TerminalWaitForExitResult)
+        BURAQ_CLIENT_ROUTE("terminal/kill", on_terminal_kill, v1::TerminalKillParams, v1::TerminalKillResult)
+        BURAQ_CLIENT_ROUTE("terminal/release", on_terminal_release, v1::TerminalReleaseParams,
+                           v1::TerminalReleaseResult)
+        BURAQ_CLIENT_ROUTE("elicitation/create", on_elicitation_create, v1::CreateElicitationParams,
+                           v1::CreateElicitationResult)
 
-        if (env.method == "fs/write_text_file") {
-            if constexpr (requires(Derived& d, const v1::FsWriteTextFileParams& p) { d.on_fs_write_text_file(p); }) {
-                return handle_agent_request<v1::FsWriteTextFileParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_fs_write_text_file(p); });
-            }
-        }
-
-        if (env.method == "terminal/create") {
-            if constexpr (requires(Derived& d, const v1::TerminalCreateParams& p) { d.on_terminal_create(p); }) {
-                return handle_agent_request<v1::TerminalCreateParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_create(p); });
-            }
-        }
-
-        if (env.method == "terminal/output") {
-            if constexpr (requires(Derived& d, const v1::TerminalOutputParams& p) { d.on_terminal_output(p); }) {
-                return handle_agent_request<v1::TerminalOutputParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_output(p); });
-            }
-        }
-
-        if (env.method == "terminal/wait_for_exit") {
-            if constexpr (requires(Derived& d, const v1::TerminalWaitForExitParams& p) {
-                d.on_terminal_wait_for_exit(p);
-            }) {
-                return handle_agent_request<v1::TerminalWaitForExitParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_wait_for_exit(p); });
-            }
-        }
-
-        if (env.method == "terminal/kill") {
-            if constexpr (requires(Derived& d, const v1::TerminalKillParams& p) { d.on_terminal_kill(p); }) {
-                return handle_agent_request<v1::TerminalKillParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_kill(p); });
-            }
-        }
-
-        if (env.method == "terminal/release") {
-            if constexpr (requires(Derived& d, const v1::TerminalReleaseParams& p) { d.on_terminal_release(p); }) {
-                return handle_agent_request<v1::TerminalReleaseParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_terminal_release(p); });
-            }
-        }
-
-        if (env.method == "elicitation/create") {
-            if constexpr (requires(Derived& d, const v1::CreateElicitationParams& p) { d.on_elicitation_create(p); }) {
-                return handle_agent_request<v1::CreateElicitationParams>(
-                    env, sink, [](Derived& d, const auto& p) { return d.on_elicitation_create(p); });
-            }
-        }
+#undef BURAQ_CLIENT_ROUTE
 
         if (!env.method.empty() && env.method.front() == '_') {
-            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
+            if constexpr (requires(Derived& d, std::string_view m, const RawJson& p, Responder<RawJson> r) {
+                { d.on_ext_method(m, p, std::move(r)) } -> std::same_as<void>;
+            }) {
+                std::string method{env.method};
+                RawJson params{std::string(env.params_json)};
+                detail::invoke_deferred(make_responder<RawJson>(*env.id, sink), [&](Responder<RawJson>& r) {
+                    self().on_ext_method(method, params, r);
+                });
+                return {};
+            } else if constexpr (requires(Derived& d, std::string_view m, const RawJson& p) {
                 { d.on_ext_method(m, p) } -> std::same_as<expected<RawJson, RpcError>>;
             }) {
-                auto res = self().on_ext_method(env.method, RawJson{std::string(env.params_json)});
+                auto res = detail::invoke_guarded(
+                    [&] { return self().on_ext_method(env.method, RawJson{std::string(env.params_json)}); });
                 if (!res) {
                     emit_bytes(Codec::encode_error(*env.id, res.error()), sink);
                 } else {
@@ -3709,14 +4484,8 @@ private:
     /// @param env Parsed response envelope.
     /// @return Always empty.
     expected<void, RpcError> dispatch_response(const RawEnvelope& env) {
-        if (env.id && std::holds_alternative<std::int64_t>(*env.id)) {
-            const auto id = std::get<std::int64_t>(*env.id);
-            if (auto it = pending_requests_.find(id); it != pending_requests_.end()) {
-                auto handler = std::move(it->second);
-                pending_requests_.erase(it);
-                handler(env);
-                return {};
-            }
+        if (pending_.complete(env)) {
+            return {};
         }
 
         if constexpr (requires(Derived& d, const RawEnvelope& r) { d.on_raw_response(r); }) {

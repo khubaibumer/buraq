@@ -59,3 +59,5 @@ class BuraqConan(ConanFile):
         self.cpp_info.set_property("cmake_target_name", "buraq::buraq")
         self.cpp_info.bindirs = []
         self.cpp_info.libdirs = []
+        if self.settings.os in ["Linux", "FreeBSD"]:
+            self.cpp_info.system_libs = ["pthread"]
